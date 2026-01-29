@@ -1,11 +1,12 @@
 package com.example.mallordergraphserver01.tools;
 
 import com.example.mallordergraphserver01.config.OrderMcpNodeProperties;
-import org.springframework.ai.mcp.McpToolUtils;
+
 import org.springframework.ai.mcp.client.autoconfigure.properties.McpClientCommonProperties;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.ai.tool.definition.ToolDefinition;
+
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -17,14 +18,17 @@ import java.util.Set;
 public class MallMcpClientToolCallbackProvider {
     private final ToolCallbackProvider toolCallbackProvider;
 
+
     private final OrderMcpNodeProperties orderMcpNodeProperties;
 
     private final McpClientCommonProperties mcpClientCommonProperties;
 
-    public MallMcpClientToolCallbackProvider(ToolCallbackProvider toolCallbackProvider,McpClientCommonProperties commonProperties){
+
+    public MallMcpClientToolCallbackProvider(ToolCallbackProvider toolCallbackProvider,
+                                             McpClientCommonProperties commonProperties, OrderMcpNodeProperties orderMcpNodeProperties){
         this.toolCallbackProvider = toolCallbackProvider;
         this.mcpClientCommonProperties = commonProperties;
-        this.orderMcpNodeProperties = new OrderMcpNodeProperties();
+        this.orderMcpNodeProperties = orderMcpNodeProperties;
     }
 
     public Set<ToolCallback> getToolCallbacks(String nodeName) {

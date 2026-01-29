@@ -22,10 +22,10 @@ public class MallOrderCmpServerApplication {
                 .toolObjects(openOrderService)
                 .build();
     }
-/*
+
     @Bean
     public WebClient.Builder webClientBuilder() {
         return WebClient.builder();
-    }*/
+    }
 
 }

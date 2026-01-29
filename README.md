@@ -26,6 +26,7 @@ EcommSpringBot/
 ├── mall-order-cmp-server/       # CMP 中台服务（封装订单能力）
 ├── mall-order-cmp_sso-client/   # 提供 Controller 接口 + Redis 聊天上下文支持
 ├── mall-order-es-rag/          # 向量知识库模块（退换货规则文档 → ES 向量）
+├── mall-order-graph-server/     # MCP 图计算服务（基于 Spring AI Alibaba）
 └── README.md
 
 

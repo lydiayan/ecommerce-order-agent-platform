@@ -17,5 +17,16 @@ spring:
           resource: true
           prompt: true
           completion: true
+        cors:
+          allowed-origins: "*"
+          allowed-methods: "*"
+          allowed-headers: "*"
 server:
   port: 8080
+logging:
+  level:
+    io.modelcontextprotocol: DEBUG
+    org.springframework.ai: DEBUG
+    org.springframework.web: DEBUG
+  pattern:
+    console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"

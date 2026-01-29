@@ -1,0 +1,8 @@
+global:
+  scrape_interval: 15s # 每 15 秒抓取一次
+
+scrape_configs:
+  - job_name: 'mall-order-web'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['host.docker.internal:8080']  # 如果 Spring Boot 在本地跑，Mac/Windows 用 host.docker.internal

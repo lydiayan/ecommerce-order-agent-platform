@@ -14,10 +14,14 @@
     <packaging>pom</packaging>
     <name>EcommSpringBot</name>
     <description>EcommSpringBot</description>
-    <modules>
-        <module>mall-order-graph-server</module>
-    </modules>
 
+    <modules>
+        <module>mall-order-cmp-sse-client</module>
+        <module>mall-order-cmp-server</module>
+        <module>mall-order</module>
+       <!-- <module>mall-order-graph-server01</module>-->
+        <!-- 其他模块 -->
+    </modules>
     <properties>
         <!-- Project revision -->
         <revision>1.0.0</revision>

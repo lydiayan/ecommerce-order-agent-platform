@@ -2,10 +2,7 @@ package com.example.mallorder.mapper;
 
 import com.example.mallorder.entity.Order;
 import com.example.mallorder.entity.OrderDetail;
-import org.apache.ibatis.annotations.Mapper;
-import org.apache.ibatis.annotations.Param;
-import org.apache.ibatis.annotations.Select;
-import org.apache.ibatis.annotations.Update;
+import org.apache.ibatis.annotations.*;
 
 import java.util.List;
 
@@ -26,4 +23,14 @@ public interface OrderMapper {
 
     @Update("UPDATE orders SET order_status = 4 WHERE order_id = #{orderId}")
     int cancelOrder(@Param("orderId") String orderId);
+
+    @Insert("INSERT INTO orders (order_id, user_id, product_id, quantity, total_price, order_status) " +
+            "VALUES (#{orderId}, #{userId}, #{productId}, #{quantity}, #{totalPrice}, #{status})")
+    int insertOrder(Order order);
+
+    @Insert("INSERT INTO order_details (order_id, product_id, product_name, quantity, unit_price, total_price) " +
+            "VALUES (#{orderId}, #{productId}, #{productName}, #{quantity}, #{unitPrice}, #{totalPrice})")
+    int insertOrderDetail(OrderDetail orderDetail);
+
+
 }

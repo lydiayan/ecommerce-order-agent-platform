@@ -277,7 +277,161 @@
             }
         });
 
-        // Function to send a chat message
+        // 解析智能客服返回的订单信息
+        function parseOrderFromReply(agentReply) {
+            try {
+                // 提取订单ID
+                const orderIdMatch = agentReply.match(/\*\*订单ID\*\*:\s*([A-Z0-9]+)/i);
+                if (!orderIdMatch) return null;
+
+                const orderId = orderIdMatch[1];
+                
+                // 提取用户ID
+                const userIdMatch = agentReply.match(/\*\*用户ID\*\*:\s*([A-Z0-9]+)/i);
+                const userId = userIdMatch ? userIdMatch[1] : '';
+
+                // 提取总金额
+                const totalAmountMatch = agentReply.match(/\*\*总金额\*\*:\s*([\d.]+)/i);
+                const totalAmount = totalAmountMatch ? parseFloat(totalAmountMatch[1]) : 0;
+
+                // 提取订单状态
+                const statusMatch = agentReply.match(/\*\*订单状态\*\*:\s*[^（]*（状态码(\d+)/i);
+                const orderStatus = statusMatch ? parseInt(statusMatch[1]) : 0;
+
+                // 提取下单时间
+                const orderTimeMatch = agentReply.match(/\*\*下单时间\*\*:\s*([\d\s:-]+)/i);
+                const orderTime = orderTimeMatch ? orderTimeMatch[1] : new Date().toISOString();
+
+                // 提取支付方式
+                const paymentMethodMatch = agentReply.match(/\*\*支付方式\*\*:\s*([^\n-]+)/i);
+                const paymentMethod = paymentMethodMatch ? paymentMethodMatch[1].trim() : '';
+
+                // 提取收货地址
+                const shippingAddressMatch = agentReply.match(/\*\*收货地址\*\*:\s*([^\n-]+)/i);
+                const shippingAddress = shippingAddressMatch ? shippingAddressMatch[1].trim() : '';
+
+                // 提取联系电话
+                const contactPhoneMatch = agentReply.match(/\*\*联系电话\*\*:\s*([^\n-]+)/i);
+                const contactPhone = contactPhoneMatch ? contactPhoneMatch[1].trim() : '';
+
+                // 提取订单详情
+                const orderDetails = [];
+                const detailSection = agentReply.match(/\*\*订单详情\*\*:([\s\S]*?)(?:---|###|$)/i);
+                if (detailSection) {
+                    const detailText = detailSection[1];
+                    
+                    // 提取商品ID
+                    const productIdMatch = detailText.match(/商品ID:\s*([A-Z0-9]+)/i);
+                    const productId = productIdMatch ? productIdMatch[1] : '';
+                    
+                    // 提取商品名称
+                    const productNameMatch = detailText.match(/商品名称:\s*([^\n-]+)/i);
+                    const productName = productNameMatch ? productNameMatch[1].trim() : '';
+                    
+                    // 提取数量
+                    const quantityMatch = detailText.match(/数量:\s*(\d+)/i);
+                    const quantity = quantityMatch ? parseInt(quantityMatch[1]) : 1;
+                    
+                    // 提取单价
+                    const unitPriceMatch = detailText.match(/单价:\s*([\d.]+)/i);
+                    const unitPrice = unitPriceMatch ? parseFloat(unitPriceMatch[1]) : 0;
+                    
+                    // 提取总价
+                    const totalPriceMatch = detailText.match(/总价:\s*([\d.]+)/i);
+                    const totalPrice = totalPriceMatch ? parseFloat(totalPriceMatch[1]) : unitPrice;
+                    
+                    // 提取规格
+                    const specificationMatch = detailText.match(/规格:\s*([^\n-]+)/i);
+                    const specification = specificationMatch ? specificationMatch[1].trim() : '';
+
+                    if (productId || productName) {
+                        orderDetails.push({
+                            productId: productId,
+                            productName: productName,
+                            quantity: quantity,
+                            unitPrice: unitPrice,
+                            totalPrice: totalPrice,
+                            specification: specification
+                        });
+                    }
+                }
+
+                return {
+                    orderId: orderId,
+                    userId: userId,
+                    orderTime: orderTime,
+                    totalAmount: totalAmount,
+                    orderStatus: orderStatus,
+                    paymentMethod: paymentMethod,
+                    shippingAddress: shippingAddress,
+                    contactPhone: contactPhone,
+                    orderDetails: orderDetails
+                };
+            } catch (error) {
+                console.error('解析订单信息失败:', error);
+                return null;
+            }
+        }
+
+        // 创建订单列表项
+        function createOrderItem(order) {
+            const item = document.createElement('li');
+            item.className = 'order-item';
+            item.dataset.orderId = order.orderId;
+
+            const statusMap = {
+                0: { text: '待付款', icon: '⏳' },
+                1: { text: '已付款', icon: '💰' },
+                2: { text: '已发货', icon: '🚚' },
+                3: { text: '已完成', icon: '✅' },
+                4: { text: '已取消', icon: '❌' }
+            };
+
+            const status = statusMap[order.orderStatus] || { text: '未知', icon: '❓' };
+
+            item.innerHTML = `
+                <div class="order-summary">
+                    <p><strong>订单ID:</strong> ${order.orderId}</p>
+                    <p><strong>用户ID:</strong> ${order.userId}</p>
+                    <p><strong>价格:</strong> ¥${order.totalAmount.toFixed(2)}</p>
+                    <p><strong>状态:</strong> <span class="status-icon">${status.icon} </span> ${status.text}</p>
+                </div>
+                <div class="order-details" style="display: none;">
+                    <p><strong>下单时间:</strong> ${order.orderTime}</p>
+                    <p><strong>支付方式:</strong> ${order.paymentMethod || '未设置'}</p>
+                    <p><strong>收货地址:</strong> ${order.shippingAddress || '未设置'}</p>
+                    <p><strong>联系电话:</strong> ${order.contactPhone || '未设置'}</p>
+                    <p><strong>订单详情:</strong></p>
+                    <ul>
+                        ${order.orderDetails.map(detail => 
+                            `<li>${detail.productName} ${detail.specification ? '(' + detail.specification + ')' : ''} x ${detail.quantity} - ¥${detail.unitPrice.toFixed(2)}</li>`
+                        ).join('')}
+                    </ul>
+                </div>
+            `;
+
+            return item;
+        }
+
+        // 替换订单列表（用新订单替换整个列表）
+        function replaceOrderList(order) {
+            const orderList = document.getElementById('order-list');
+            
+            // 清空现有列表
+            orderList.innerHTML = '';
+            
+            // 添加新订单
+            const item = createOrderItem(order);
+            orderList.appendChild(item);
+            
+            // 高亮显示新订单
+            item.classList.add('active');
+            item.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            setTimeout(() => {
+                item.classList.remove('active');
+            }, 2000);
+        }
+
         // Function to send a chat message
         function sendMessage() {
             const messageText = chatInput.value.trim();
@@ -299,10 +453,18 @@
                         return response.text(); // Assuming plain text response
                     })
                     .then(agentReply => {
-                        // Display agent's response
+                        // 尝试解析订单信息
+                        const orderInfo = parseOrderFromReply(agentReply);
+                        if (orderInfo) {
+                            // 如果解析到订单信息，替换左侧列表
+                            replaceOrderList(orderInfo);
+                        }
+
+                        // Display agent's response in chat box
                         const agentMessageElement = document.createElement('div');
                         agentMessageElement.className = 'message other-message';
-                        agentMessageElement.textContent = agentReply;
+                        // 保持原始格式，支持换行
+                        agentMessageElement.innerHTML = agentReply.replace(/\n/g, '<br>');
                         chatBox.appendChild(agentMessageElement);
                         chatBox.scrollTop = chatBox.scrollHeight;
                     })
