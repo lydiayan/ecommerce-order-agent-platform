@@ -51,12 +51,12 @@ public class SearchResponse {
         private String id;
         private String content;
         private double score;
-        private Object metadata;
+        private DocumentMetadata metadata;
 
         public SearchHit() {
         }
 
-        public SearchHit(String id, String content, double score, Object metadata) {
+        public SearchHit(String id, String content, double score, DocumentMetadata metadata) {
             this.id = id;
             this.content = content;
             this.score = score;
@@ -87,11 +87,11 @@ public class SearchResponse {
             this.score = score;
         }
 
-        public Object getMetadata() {
+        public DocumentMetadata getMetadata() {
             return metadata;
         }
 
-        public void setMetadata(Object metadata) {
+        public void setMetadata(DocumentMetadata metadata) {
             this.metadata = metadata;
         }
     }

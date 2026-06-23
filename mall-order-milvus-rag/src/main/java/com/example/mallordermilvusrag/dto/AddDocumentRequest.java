@@ -1,7 +1,5 @@
 package com.example.mallordermilvusrag.dto;
 
-import java.util.Map;
-
 /**
  * 添加文档请求 DTO
  */
@@ -15,7 +13,7 @@ public class AddDocumentRequest {
     /**
      * 文档元数据（可选）
      */
-    private Map<String, Object> metadata;
+    private DocumentMetadata metadata;
 
     public AddDocumentRequest() {
     }
@@ -24,7 +22,7 @@ public class AddDocumentRequest {
         this.text = text;
     }
 
-    public AddDocumentRequest(String text, Map<String, Object> metadata) {
+    public AddDocumentRequest(String text, DocumentMetadata metadata) {
         this.text = text;
         this.metadata = metadata;
     }
@@ -37,11 +35,11 @@ public class AddDocumentRequest {
         this.text = text;
     }
 
-    public Map<String, Object> getMetadata() {
+    public DocumentMetadata getMetadata() {
         return metadata;
     }
 
-    public void setMetadata(Map<String, Object> metadata) {
+    public void setMetadata(DocumentMetadata metadata) {
         this.metadata = metadata;
     }
 }

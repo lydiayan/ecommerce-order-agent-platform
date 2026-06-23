@@ -1,12 +1,12 @@
 package example.mallordercmp_ssoclient.config;
 
 
-import com.alibaba.cloud.ai.memory.redis.RedisChatMemoryRepository;
+import com.alibaba.cloud.ai.memory.redis.RedissonRedisChatMemoryRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-@Configuration
+//@Configuration
 public class RedisMemoryConfig {
 
     @Value("${spring.ai.memory.redis.host}")
@@ -21,12 +21,16 @@ public class RedisMemoryConfig {
     @Value("${spring.ai.memory.redis.timeout}")
     private int redisTimeout;
 
-    @Bean
-    public RedisChatMemoryRepository redisChatMemoryRepository() {
-        return RedisChatMemoryRepository.builder()
+    //@Bean
+    public RedissonRedisChatMemoryRepository redisChatMemoryRepository() {
+        return RedissonRedisChatMemoryRepository.builder()
                 .host(redisHost)
                 .port(redisPort)
+                // 若没有设置密码则注释该项
+//				.password(redisPassword)
                 .timeout(redisTimeout)
                 .build();
     }
+
+
 }

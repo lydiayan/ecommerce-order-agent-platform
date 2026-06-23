@@ -5,6 +5,9 @@ spring:
   application:
     name: mall-order-milvus-rag
 
+  config:
+    import: classpath:rag.yml
+
   ai:
     # Embedding 模型配置（DashScope OpenAI 兼容接口）
     openai:
@@ -13,17 +16,6 @@ spring:
       embedding:
         options:
           model: text-embedding-v2
-
-    # Milvus 向量数据库配置
-    vectorstore:
-      milvus:
-        host: localhost
-        port: 19530
-        collection-name: mall_rag_collection
-        dimensions: 1536
-        index-type: IVF_FLAT
-        metric-type: COSINE
-        initialize-schema: true
 
 # 若想使用 DeepSeek Embedding，确保 DEEPSEEK_API_KEY 有效且可访问 /v1/embeddings 端点
 #spring:

@@ -24,7 +24,7 @@ public class OrderController {
 
     // 订单详情查询（根据订单号）
     @GetMapping("/order/{orderId}")
-    public Order getOrderById(@PathVariable(value = "userId") String orderId) {
+    public Order getOrderById(@PathVariable(value = "orderId") String orderId) {
         log.info("=====》根据订单号查询订单");
         return orderService.getOrderById(orderId);
     }

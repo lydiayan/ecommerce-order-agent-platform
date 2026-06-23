@@ -19,12 +19,16 @@
         <module>mall-order-cmp-sse-client</module>
         <module>mall-order-cmp-server</module>
         <module>mall-order</module>
+        <module>skill-agent-demo</module>
+        <module>mall-order-milvus-rag</module>
+        <module>mall-order-milvus-memory</module>
        <!-- <module>mall-order-graph-server01</module>-->
         <!-- 其他模块 -->
     </modules>
     <properties>
         <!-- Project revision -->
         <revision>1.0.0</revision>
+
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <java.version>17</java.version>
@@ -32,13 +36,18 @@
         <maven.compiler.target>17</maven.compiler.target>
 
         <!-- Spring AI -->
-        <spring-ai.version>1.0.0</spring-ai.version>
+        <spring-ai.version>1.1.0</spring-ai.version>
+        <!-- Spring Boot -->
+        <spring-boot.version>3.5.7</spring-boot.version>
 
         <!-- Spring AI Alibaba -->
-        <spring-ai-alibaba.version>1.0.0.2</spring-ai-alibaba.version>
+        <!-- Install Spring AI Alibaba in your local. -->
+        <spring-ai-alibaba.version>1.1.2.0</spring-ai-alibaba.version>
+        <spring-ai-alibaba-extensions.version>1.1.2.0</spring-ai-alibaba-extensions.version>
 
-        <!-- Spring Boot -->
-        <spring-boot.version>3.5.3</spring-boot.version>
+        <!-- Spring Cloud -->
+        <spring-cloud.version>2025.0.0</spring-cloud.version>
+        <spring-cloud-alibaba.version>2023.0.1.2</spring-cloud-alibaba.version>
 
         <!-- maven plugin -->
         <maven-deploy-plugin.version>3.1.1</maven-deploy-plugin.version>
@@ -63,10 +72,40 @@
             </dependency>
             <dependency>
                 <groupId>com.alibaba.cloud.ai</groupId>
+                <artifactId>spring-ai-alibaba-extensions-bom</artifactId>
+                <version>${spring-ai-alibaba-extensions.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!--扩展添加-->
+            <dependency>
+                <groupId>com.alibaba.cloud.ai</groupId>
                 <artifactId>spring-ai-alibaba-bom</artifactId>
                 <version>${spring-ai-alibaba.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+            <!-- Spring Cloud -->
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${spring-cloud.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- Spring Cloud Alibaba -->
+            <dependency>
+                <groupId>com.alibaba.cloud</groupId>
+                <artifactId>spring-cloud-alibaba-dependencies</artifactId>
+                <version>${spring-cloud-alibaba.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>com.alibaba.cloud.ai</groupId>
+                <artifactId>spring-ai-alibaba-agent-framework</artifactId>
+                <version>1.1.2.0</version>
+                <type>pom</type>
             </dependency>
 
         </dependencies>
@@ -135,7 +174,7 @@
     </build>
 
     <repositories>
-        <repository>
+      <!--  <repository>
             <id>spring-milestones</id>
             <name>Spring Milestones</name>
             <url>https://repo.spring.io/milestone</url>
@@ -161,7 +200,7 @@
             <snapshots>
                 <enabled>true</enabled>
             </snapshots>
-        </repository>
+        </repository>-->
         <repository>
             <id>aliyunmaven</id>
             <name>aliyun</name>

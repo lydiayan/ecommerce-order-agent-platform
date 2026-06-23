@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.embedding.TokenCountBatchingStrategy;
+import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.ai.vectorstore.elasticsearch.ElasticsearchVectorStore;
 import org.springframework.ai.vectorstore.elasticsearch.ElasticsearchVectorStoreOptions;
 import org.springframework.ai.vectorstore.elasticsearch.SimilarityFunction;
@@ -15,7 +16,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 
-@Configuration
+//@Configuration
 public class ElasticsearchConfig {
 
     private static final Logger logger = LoggerFactory.getLogger(ElasticsearchConfig.class);
@@ -32,7 +33,7 @@ public class ElasticsearchConfig {
     @Value("${spring.ai.vectorstore.elasticsearch.dimensions}")
     private int dimensions;
 
-    @Bean
+    //@Bean
     public RestClient restClient() {
         String[] urlParts = url.split("://");
         String protocol = urlParts[0];
@@ -40,21 +41,14 @@ public class ElasticsearchConfig {
         String[] hostPortParts = hostAndPort.split(":");
         String host = hostPortParts[0];
         int port = Integer.parseInt(hostPortParts[1]);
-      /*
-              // 创建凭证提供者  es没有设置用户名和密码
-      CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
-        credentialsProvider.setCredentials(AuthScope.ANY,
-                new UsernamePasswordCredentials(username, password));
-                RestClientBuilder builder = RestClient.builder(new HttpHost("localhost", 9200, "http"))
-    .setHttpClientConfigCallback(httpClientBuilder ->
-        httpClientBuilder.setDefaultCredentialsProvider(credentialsProvider));
-;*/
 
-
-    return  RestClient.builder(new HttpHost(host,port,protocol)).build();
+        // 创建 Elasticsearch RestClient
+        return RestClient.builder(
+                new HttpHost(host, port, protocol)
+        ).build();
     }
 
-    @Bean
+/*    @Bean
     @Qualifier("esVectorStore")
     public ElasticsearchVectorStore vectorStore(@Qualifier("restClient") RestClient restClient, EmbeddingModel embeddingModel) {
         logger.info("创建es向量数据库");
@@ -63,11 +57,11 @@ public class ElasticsearchConfig {
         options.setIndexName(indexName);
         options.setDimensions(dimensions);
 
-        return  ElasticsearchVectorStore.builder(restClient,embeddingModel)
+        return ElasticsearchVectorStore.builder(restClient, embeddingModel)
                 .options(options)
                 .initializeSchema(true)
                 .batchingStrategy(new TokenCountBatchingStrategy())
                 .build();
-    }
+    }*/
 
 }

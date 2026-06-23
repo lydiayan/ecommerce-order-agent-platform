@@ -1,6 +1,7 @@
 package com.example.mallordercmpserver.service;
 import com.example.mallordercmpserver.data.Order;
 import com.example.mallordercmpserver.data.Product;
+import org.springaicommunity.mcp.annotation.McpTool;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
@@ -28,7 +29,7 @@ public class OpenOrderService {
         this.restTemplate = new RestTemplate();
     }
 
-    @Tool(description = "获取所有订单信息" )
+    @McpTool(description = "获取所有订单信息" )
     public List<Order> getOrders() {
         // 尝试远程调用
         System.out.println("获取所有订单信息");

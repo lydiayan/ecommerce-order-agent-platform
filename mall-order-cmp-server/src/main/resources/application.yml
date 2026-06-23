@@ -1,10 +1,36 @@
 
 spring:
+  application:
+    name: mall-order-cmp-server
+  config:
+    import: optional:nacos:${spring.application.name}.yml
   main:
     banner-mode: off
+  cloud:
+    nacos:
+      discovery:
+        server-addr: localhost:8848
+        namespace: public
+        group: DEFAULT_GROUP
+        enabled: true
+        username: nacos  # 添加账号
+        password: nacos  # 添加密码
+      config:
+        server-addr: localhost:8848
+        namespace: public
+        group: DEFAULT_GROUP
+        file-extension: yaml
+        enabled: true
+        username: nacos  # 添加账号
+        password: nacos  # 添加密码
+        shared-configs:
+          - data-id: common-config.yaml
+            group: DEFAULT_GROUP
+            refresh: true
   ai:
     mcp:
       server:
+        enabled: true
         name: mall-order-cmp-server
         version: 0.0.1
         type: ASYNC  # Recommended for reactive applications
@@ -21,12 +47,15 @@ spring:
           allowed-origins: "*"
           allowed-methods: "*"
           allowed-headers: "*"
+        security:
+          enabled: false
 server:
-  port: 8080
+  port: 8082
 logging:
   level:
     io.modelcontextprotocol: DEBUG
     org.springframework.ai: DEBUG
     org.springframework.web: DEBUG
+
   pattern:
     console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"

@@ -1,12 +1,10 @@
 package example.mallordercmp_ssoclient;
 
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
-import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.stereotype.Component;
 
@@ -20,9 +18,9 @@ public class MallOrderCmpSseClientApplication {
         SpringApplication.run(MallOrderCmpSseClientApplication.class, args);
     }
 
-    @Bean
+    //@Bean
     public CommandLineRunner predefinedQuestions(ChatClient.Builder chatClientBuilder, OrderService orderService) {
-        String userInput1 = "查询用户USER1008的订单";
+        String userInput1 = "查询所有订单";
         return args -> {
             var chatClient = chatClientBuilder
                     .defaultSystem("你是一个电商订单查询助手，能够帮助用户查询订单信息。")
