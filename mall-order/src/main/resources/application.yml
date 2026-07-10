@@ -4,34 +4,34 @@ server:
 spring:
   application:
     name: mall-order
-  config:
-    import: optional:nacos:${spring.application.name}.yml
+#  config:
+#    import: optional:nacos:${spring.application.name}.yml
   datasource:
     url: jdbc:mysql://localhost:3306/products?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
     username: root
     password: root
     driver-class-name: com.mysql.cj.jdbc.Driver
-  cloud:
-    nacos:
-      discovery:
-        server-addr: localhost:8848
-        namespace: public
-        group: DEFAULT_GROUP
-        enabled: true
-        username: nacos  # 添加账号
-        password: nacos  # 添加密码
-      config:
-        server-addr: localhost:8848
-        namespace: public
-        group: DEFAULT_GROUP
-        file-extension: yaml
-        enabled: true
-        username: nacos  # 添加账号
-        password: nacos  # 添加密码
-        shared-configs:
-          - data-id: common-config.yaml
-            group: DEFAULT_GROUP
-            refresh: true
+#  cloud:
+#    nacos:
+#      discovery:
+#        server-addr: localhost:8848
+#        namespace: public
+#        group: DEFAULT_GROUP
+#        enabled: true
+#        username: nacos  # 添加账号
+#        password: nacos  # 添加密码
+#      config:
+#        server-addr: localhost:8848
+#        namespace: public
+#        group: DEFAULT_GROUP
+#        file-extension: yaml
+#        enabled: true
+#        username: nacos  # 添加账号
+#        password: nacos  # 添加密码
+#        shared-configs:
+#          - data-id: common-config.yaml
+#            group: DEFAULT_GROUP
+#            refresh: true
 mybatis:
   configuration:
     map-underscore-to-camel-case: true

@@ -52,6 +52,12 @@
             <artifactId>spring-ai-autoconfigure-model-openai</artifactId>
         </dependency>
 
+        <!-- OpenAI Chat Model（DashScope 兼容模式，用于 /ask 生成回答） -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-model-openai</artifactId>
+        </dependency>
+
         <!-- PDF Document Reader -->
         <dependency>
             <groupId>org.springframework.ai</groupId>
@@ -76,6 +82,13 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
+        </dependency>
+
+        <!-- RAG Trace 可观测性：RocketMQ + ES -->
+        <dependency>
+            <groupId>com.example</groupId>
+            <artifactId>mall-order-observability</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
         </dependency>
     </dependencies>
 

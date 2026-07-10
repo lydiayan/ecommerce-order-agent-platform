@@ -34,6 +34,18 @@ public class SearchRequest {
     /** 按版本过滤，如 "1.0" */
     private String versionFilter;
 
+    /** 是否启用 qwen rerank；null 时使用 rag.yml 默认配置 */
+    private Boolean enableRerank;
+
+    /** rerank 后返回条数；null 时使用 topK */
+    private Integer rerankTopN;
+
+    /** Milvus 召回条数；null 时使用 topK × candidateMultiplier */
+    private Integer recallTopK;
+
+    /** rerank 最低分阈值；null 时使用 rag.yml 默认配置 */
+    private Double rerankMinScore;
+
     public SearchRequest() {
     }
 
@@ -100,5 +112,37 @@ public class SearchRequest {
 
     public void setVersionFilter(String versionFilter) {
         this.versionFilter = versionFilter;
+    }
+
+    public Boolean getEnableRerank() {
+        return enableRerank;
+    }
+
+    public void setEnableRerank(Boolean enableRerank) {
+        this.enableRerank = enableRerank;
+    }
+
+    public Integer getRerankTopN() {
+        return rerankTopN;
+    }
+
+    public void setRerankTopN(Integer rerankTopN) {
+        this.rerankTopN = rerankTopN;
+    }
+
+    public Integer getRecallTopK() {
+        return recallTopK;
+    }
+
+    public void setRecallTopK(Integer recallTopK) {
+        this.recallTopK = recallTopK;
+    }
+
+    public Double getRerankMinScore() {
+        return rerankMinScore;
+    }
+
+    public void setRerankMinScore(Double rerankMinScore) {
+        this.rerankMinScore = rerankMinScore;
     }
 }

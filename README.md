@@ -1,11 +1,5 @@
 # 使用Spring AI Alibaba实现的智能客服
 
-> Spring AI Alibaba Repo: https://github.com/alibaba/spring-ai-alibaba
->
-> Spring AI Alibaba Website: https://java2ai.com/docs/frameworks/studio/quick-start
->
-> Spring AI Alibaba Website Repo: https://github.com/springaialibaba/spring-ai-alibaba-website
-
 EcommSpringBot 是一个基于 SpringAI Alibaba 的企业级智能客服助手系统，支持用户通过自然语言交互完成订单查询、自动取消、规则问答等操作，融合微服务架构、RAG 技术、Redis 聊天上下文记忆与向量数据库，实现私有化可扩展的智能体服务平台。
 
 ## 项目亮点
@@ -25,7 +19,8 @@ EcommSpringBot/
 ├── mall-order-cmp_sso-client/        # 提供 Controller 接口 + Redis 聊天上下文支持
 ├── mall-order-es-rag/                # ES 向量知识库模块（退换货规则文档 → ES 向量）
 ├── mall-order-graph-server/          # MCP 图计算服务（基于 Spring AI Alibaba）
-├── mall-order-milvus-rag/            # Milvus RAG 向量检索服务（端口 8086）
+├── mall-order-milvus-rag/            # Milvus RAG 检索 + rerank + 问答（端口 8086）
+├── mall-order-agent/                 # 订单 Agent（StateGraph 编排，端口 8087）
 ├── mall-order-milvus-memory/         # 多层对话记忆模块（Redis 短期 + Milvus 长期）
 └── README.md
 ```
@@ -45,8 +40,10 @@ EcommSpringBot/
 
 ### 3. 向量检索增强（RAG）
 - 使用 text-embedding-v2 模型生成向量，存入 Milvus 向量数据库
-- 支持 PDF 文档导入、文本分块、语义搜索
-- 用户提问如"退货流程是什么？"可自动语义匹配文档内容并回答
+- 支持 PDF 文档导入、按章节分块、语义搜索
+- 集成 **qwen3-rerank** 精排，提升检索相关性
+- 提供 **`/ask` 问答接口**：检索 + rerank + Qwen 生成自然语言回答
+- 用户提问如「婚假有多少天？」可自动匹配 HR 手册并给出答案
 
 ### 4. 多层对话记忆
 - 短期记忆（Redis）：当前对话上下文，自动过期淘汰
@@ -55,32 +52,59 @@ EcommSpringBot/
 
 ---
 
-## mall-order-milvus-rag — RAG 向量检索模块
+## mall-order-milvus-rag — RAG 向量检索与问答模块
 
-基于 Spring AI + Milvus 的 RAG（检索增强生成）服务。支持 PDF 文档导入、文本分块、语义搜索。
+基于 **Spring AI + Milvus + DashScope** 的企业知识库 RAG 服务（端口 **8086**）。支持 PDF 导入、按章节分块、向量检索、Qwen 重排序、LLM 问答生成。
 
 ### 技术架构
 
 ```
-用户请求 → Text Embedding → Milvus 向量检索 → 返回相似文档块
-               ↑
-        DashScope text-embedding-v2 (1536维)
+                    ┌─────────────────────────────────────────┐
+  用户问题 ────────► │  POST /ask  或  POST /search           │
+                    └──────────────────┬──────────────────────┘
+                                       │
+         ┌─────────────────────────────▼─────────────────────────────┐
+         │  1. Retrieve   Milvus 向量召回（COSINE，可 metadata 过滤）   │
+         │  2. Rerank     qwen3-rerank 精排（可选）                     │
+         │  3. Generate   qwen-plus 生成回答（仅 /ask）                 │
+         └─────────────────────────────────────────────────────────────┘
+                                       │
+              DashScope text-embedding-v2（1536 维） + qwen3-rerank + qwen-plus
 ```
 
-### 核心依赖
+**入库流程：**
 
-| 组件 | 说明 |
+```
+PDF/文本 → PdfTextCleaner 清洗 → 按「第X章」预切分 → Token 分块（250 token）
+         → text-embedding-v2 → Milvus Collection（mall_rag_v2）
+```
+
+### 内置知识库
+
+模块内置 7 份 PDF（`src/main/resources/data/`），metadata 在 `rag.yml` 的 `rag.catalog` 中维护：
+
+| 文档 | department | role（权限过滤） |
+|------|------------|------------------|
+| 01_HR员工手册.pdf | HR | hr |
+| 02_财务制度.pdf | Finance | finance |
+| 03_电商订单规则.pdf | Operations | public |
+| 04_物流规则.pdf | Logistics | public |
+| 05_客服处理手册.pdf | CustomerService | customer_service |
+| 06_技术开发规范.pdf | Engineering | developer |
+| 07_AI_Agent运维手册.pdf | Platform | admin |
+
+### 配置文件
+
+| 文件 | 内容 |
 |------|------|
-| `spring-ai-starter-vector-store-milvus` | Milvus 向量存储自动配置 |
-| `milvus-sdk-java` 2.5.4 | Milvus 低层 SDK |
-| `spring-ai-autoconfigure-model-openai` | OpenAI 兼容 embedding（对接 DashScope） |
-| `spring-ai-pdf-document-reader` | PDF 文档解析（基于 PDFBox） |
-| `spring-ai-rag` | Spring AI RAG 支持 |
-
-### 配置
+| `application.yml` | 端口、DashScope API Key、Embedding/Chat 模型 |
+| `rag.yml` | Milvus 连接、分块参数、rerank、ask、文档 catalog |
 
 ```yaml
+# application.yml（节选）
 spring:
+  config:
+    import: classpath:rag.yml
   ai:
     openai:
       api-key: ${DASHSCOPE_API_KEY}
@@ -88,40 +112,137 @@ spring:
       embedding:
         options:
           model: text-embedding-v2
-    vectorstore:
-      milvus:
-        host: localhost
-        port: 19530
-        collection-name: mall_rag_collection
-        dimensions: 1536
-        index-type: IVF_FLAT
-        metric-type: COSINE
-        initialize-schema: true
+      chat:
+        options:
+          model: qwen-plus
+          temperature: 0.3
+
+# rag.yml（节选）
+rag:
+  chunk:
+    chunk-size: 250
+    min-chunk-size-chars: 80
+  rerank:
+    enabled: true
+    model: qwen3-rerank
+    candidate-multiplier: 3
+  ask:
+    model: qwen-plus
+    context-top-k: 5
+  catalog:
+    - filename: 01_HR员工手册.pdf
+      department: HR
+      role: hr
+      version: "3.2"
 ```
 
+Milvus Collection 名：**`mall_rag_v2`**（自定义 Schema，含 `source / department / role / version / create_time` 标量字段，支持过滤）。
+
 ### REST API（端口 8086）
+
+#### 文档管理
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
 | `/vector/milvus/health` | GET | 健康检查 |
-| `/vector/milvus/documents` | POST | 添加单条文本到向量库 |
+| `/vector/milvus/documents` | POST | 添加单条文本 |
 | `/vector/milvus/documents/batch` | POST | 批量添加文本 |
-| `/vector/milvus/documents/pdf` | POST | 上传 PDF 导入向量库 |
-| `/vector/milvus/search` | POST | 语义搜索（支持相似度阈值） |
-| `/vector/milvus/search` | GET | 语义搜索（简易版） |
-| `/vector/milvus/stats` | GET | 服务状态统计 |
+| `/vector/milvus/documents/pdf` | POST | 上传单个 PDF（按 catalog 自动匹配 metadata） |
+| `/vector/milvus/documents/pdf/batch` | POST | 批量上传 PDF |
+| `/vector/milvus/documents/import-local` | POST | 一键导入 `classpath:data/*.pdf` |
+| `/vector/milvus/stats` | GET | 服务状态 |
+
+#### 检索与问答
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/vector/milvus/search` | POST | 向量检索 + rerank（返回 chunk 列表） |
+| `/vector/milvus/search` | GET | 简易检索（`?q=...&topK=5`） |
+| `/vector/milvus/ask` | POST | **RAG 问答**（检索 + rerank + Qwen 生成答案） |
+
+### 快速上手
+
+```bash
+# 1. 设置 API Key
+export DASHSCOPE_API_KEY=sk-xxx
+
+# 2. 启动 Milvus（默认 localhost:19530）后启动服务
+cd mall-order-milvus-rag && mvn spring-boot:run
+
+# 3. 一键导入内置 7 份 PDF
+curl -X POST http://localhost:8086/vector/milvus/documents/import-local
+
+# 4. RAG 问答
+curl -X POST http://localhost:8086/vector/milvus/ask \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "婚假有多少天？",
+    "topK": 5,
+    "similarityThreshold": 0.2,
+    "roleFilter": "hr",
+    "enableRerank": true,
+    "rerankMinScore": 0.1
+  }'
+```
+
+### 检索请求参数（`/search` 与 `/ask` 共用）
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `query` | string | 用户问题（必填） |
+| `topK` | int | 最终返回条数，默认 5 |
+| `similarityThreshold` | double | 向量召回阈值（0~1），默认 0.0 |
+| `roleFilter` | string | 按权限角色过滤，如 `hr`、`customer_service` |
+| `departmentFilter` | string | 按部门过滤 |
+| `sourceFilter` | string | 按 PDF 文件名过滤 |
+| `enableRerank` | boolean | 是否启用 qwen3-rerank，默认 true |
+| `recallTopK` | int | Milvus 召回数，默认 `topK × candidateMultiplier` |
+| `rerankTopN` | int | rerank 返回数，默认等于 topK |
+| `rerankMinScore` | double | rerank 最低分（0~1） |
+
+### 返回字段说明
+
+**`/search` 单条 hit：**
+
+| 字段 | 说明 |
+|------|------|
+| `score` | 主分数（rerank 启用时为 rerank 分） |
+| `vectorScore` | Milvus 余弦相似度（通常 0.3~0.5） |
+| `rerankScore` | qwen3-rerank 相关性（0~1，更适合设阈值） |
+| `metadata.source` | 来源 PDF 文件名 |
+
+**`/ask` 响应：**
+
+| 字段 | 说明 |
+|------|------|
+| `answer` | Qwen 生成的自然语言回答 |
+| `grounded` | 是否基于知识库片段（false = 未检索到资料） |
+| `retrieval` | 完整检索结果（含 hits，便于展示引用） |
 
 ### 文档分块策略
 
-使用 `TokenTextSplitter(500, 100, 5, 10000, true)`：
-- 每块最大 500 token
-- 块间重叠 100 token（保持上下文连贯）
-- PDF 先按页拆分，再按 token 分块
+1. **PDF 清洗**（`PdfTextCleaner`）：去除排版噪声、在章/条/句末插入换行
+2. **按章预切分**（`ChapterTextSplitter`）：按「第X章」切段，避免 chunk 跨章节
+3. **Token 分块**（`TokenTextSplitter`）：每章内再切，默认 **250 token**，`minChunkSizeChars=80`
 
-### 注意
+> 修改分块参数后需重新执行 `import-local` 或重新上传 PDF，旧向量不会自动更新。
 
-- 使用 DashScope（阿里云）OpenAI 兼容接口，需设置 `DASHSCOPE_API_KEY` 环境变量
-- text-embedding-v2 固定输出 1536 维向量，与 Milvus 集合维度一致
+### 核心依赖
+
+| 组件 | 说明 |
+|------|------|
+| `spring-ai-starter-vector-store-milvus` | Milvus 向量存储 |
+| `milvus-sdk-java` 2.5.4 | Milvus 低层 SDK（自定义 Schema） |
+| `spring-ai-starter-model-openai` | Chat 模型（DashScope 兼容模式） |
+| `spring-ai-autoconfigure-model-openai` | Embedding 模型 |
+| `spring-ai-pdf-document-reader` | PDF 解析 |
+
+### 注意事项
+
+- 环境变量 **`DASHSCOPE_API_KEY`** 必填（Embedding + Rerank + Chat 共用）
+- text-embedding-v2 固定 **1536 维**，与 Milvus 集合维度一致
+- 向量 score 与 rerank score **尺度不同**：召回阶段 threshold 宜设 0.2~0.3，rerank 阶段宜设 0.3~0.5
+- 新增文档：在 `rag.yml` 的 `catalog` 添加条目 + 放入 `data/` 目录，再调用导入接口
 
 ---
 
@@ -157,7 +278,7 @@ spring:
 │  └───────────────────┘                  │
 └─────────────────────────────────────────┘
 ```
-
+![img_1.png](img_1.png)
 ### 三层记忆结构
 
 | 层级 | 存储 | 集合/介质 | 生命周期 | 说明 |
@@ -287,10 +408,101 @@ cd ../mall-order-milvus-rag && mvn spring-boot:run
 
 | 依赖 | 用途 | RAG | Memory |
 |------|------|-----|--------|
-| DashScope text-embedding-v2 | 文本向量化 | 文档搜索 | 记忆存储 |
-| Milvus 向量数据库 | 向量存储与检索 | 文档块 | 长期记忆 |
-| Spring AI 1.1.0 | AI 抽象层 | vector store | embedding/chat |
+| DashScope text-embedding-v2 | 文本向量化 | 文档入库/检索 | 记忆存储 |
+| DashScope qwen3-rerank | 检索精排 | `/search`、`/ask` | — |
+| DashScope qwen-plus | 问答生成 | `/ask` | 记忆提取 |
+| Milvus 向量数据库 | 向量存储与检索 | 文档块（mall_rag_v2） | 长期记忆 |
+| Spring AI 1.1.0 | AI 抽象层 | vector store / chat | embedding/chat |
 | Java 17 + Spring Boot 3.5.7 | 运行环境 | 通用 | 通用 |
+
+---
+
+## mall-order-agent — 订单 Agent（StateGraph 编排）
+
+基于 **Spring AI Alibaba Graph** 的订单问答 Agent（端口 **8087**）。通过 `StateGraph` 将 Memory、Retrieve、Planner、Prompt、LLM、Human、Answer 七个节点串联，对外提供 `POST /agent/order/ask` 接口。
+
+### 技术架构
+
+```
+HTTP 层          OrderAgentController（/agent/order/ask）
+    ↓
+编排入口层        OrderAgentService（组装初始状态、调 Graph、转 Response）
+    ↓
+Graph 执行层      CompiledGraph.invoke() 按边依次跑节点
+    ↓
+节点层            planner → actionRunner → prompt → llm → human → answer
+    ↓
+基础设施          ActionExecutorRegistry / Redis / MySQL / Milvus / RAG / LLM
+```
+
+### 完整流程图
+
+![img_2.png](img_2.png)
+
+### 节点说明
+
+| 节点 | 职责 | 主要读写 |
+|------|------|----------|
+| `memory` | 加载 Redis 短期历史、MySQL 用户画像、Milvus 长期记忆 | 只读，不写记忆 |
+| `planner` | 输出 `ActionDefinition` 动作链 | 写 `plan`、`planStrategy` |
+| `actionRunner` | 按 plan 通过 Registry 动态执行 MEMORY/RAG/TOOL | 写记忆、检索、工具结果等 |
+| `prompt` | 读取 Planner 结果，PromptBuilder 组装 LLM 输入 | 写 `builtPrompt` |
+| `llm` | 调用 ChatClient（qwen-plus）生成回答 | 写 `answer` |
+| `human` | 人工审核关口（默认自动放行） | 写 `nextNode` |
+| `answer` | 持久化本轮问答到 Redis 短期记忆 | 写 Redis |
+
+### 两条主路径
+
+**路径 1 — 知识库无命中（短路）**
+
+```
+ask → planner → actionRunner(含 retrieve 无命中) → answer → END
+```
+
+- `grounded = false`，不调 LLM，返回固定「知识库中未找到…」文案
+- 仍会在 `answer` 节点写入 Redis 短期记忆
+
+**路径 2 — 知识库有命中（完整 RAG）**
+
+```
+ask → planner → actionRunner → prompt → llm → human → answer → END
+```
+
+- `grounded = true`，基于检索资料 + 记忆上下文生成回答
+- `human` 节点默认无人工反馈时自动路由到 `answer`
+
+**路径 3 — 人工驳回重写（需开启 HITL）**
+
+```
+... → llm → human(中断) → [人工 resume + revisedQuery] → planner → actionRunner → prompt → llm → human → answer → END
+```
+
+配置 `agent.graph.human-review-enabled: true` 后，在 `human` 节点前中断，等待人工审核。
+
+### 关键状态键（AgentGraphKeys）
+
+| 状态键 | 含义 |
+|--------|------|
+| `grounded` | 是否有 RAG 检索依据；`retrieve` 后用于条件路由 |
+| `answer` | 最终回答（短路时在 retrieve 写入，正常路径在 llm 写入） |
+| `nextNode` | `human` 节点输出的路由键（`answer` / `planner` / `END`） |
+| `humanFeedback` | 人工审核输入（`approved`、`revisedQuery`） |
+
+### 配置示例
+
+```yaml
+agent:
+  graph:
+    human-review-enabled: false   # 默认关闭人工审核，human 节点自动放行
+```
+
+### 启动
+
+```bash
+cd mall-order-agent && mvn spring-boot:run
+```
+
+依赖：Redis（短期记忆）、Milvus（RAG + 长期记忆）、MySQL（用户画像，可选）、DashScope API Key。
 
 ---
 
@@ -301,7 +513,3 @@ cd ../mall-order-milvus-rag && mvn spring-boot:run
 如果你觉得该项目有价值，欢迎 Star 或 Fork！
 
 📬 联系作者：996766130@qq.com
-
-## 前端页面
-
-![img_1.png](img_1.png)

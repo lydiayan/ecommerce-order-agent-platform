@@ -21,7 +21,9 @@
         <module>mall-order</module>
         <module>skill-agent-demo</module>
         <module>mall-order-milvus-rag</module>
-        <module>mall-order-milvus-memory</module>
+        <module>mall-order-memory</module>
+        <module>mall-order-observability</module>
+        <module>mall-order-agent</module>
        <!-- <module>mall-order-graph-server01</module>-->
         <!-- 其他模块 -->
     </modules>
@@ -48,6 +50,8 @@
         <!-- Spring Cloud -->
         <spring-cloud.version>2025.0.0</spring-cloud.version>
         <spring-cloud-alibaba.version>2023.0.1.2</spring-cloud-alibaba.version>
+        <!-- spring-cloud-alibaba BOM pins rocketmq 5.1.4; rocketmq-spring 2.3.x needs 5.2+ -->
+        <rocketmq.version>5.3.1</rocketmq.version>
 
         <!-- maven plugin -->
         <maven-deploy-plugin.version>3.1.1</maven-deploy-plugin.version>
@@ -104,8 +108,49 @@
             <dependency>
                 <groupId>com.alibaba.cloud.ai</groupId>
                 <artifactId>spring-ai-alibaba-agent-framework</artifactId>
-                <version>1.1.2.0</version>
-                <type>pom</type>
+                <version>${spring-ai-alibaba.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.alibaba.cloud.ai</groupId>
+                <artifactId>spring-ai-alibaba-graph-core</artifactId>
+                <version>${spring-ai-alibaba.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.alibaba.cloud.ai</groupId>
+                <artifactId>spring-ai-alibaba-starter-graph-observation</artifactId>
+                <version>${spring-ai-alibaba.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.rocketmq</groupId>
+                <artifactId>rocketmq-client</artifactId>
+                <version>${rocketmq.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.rocketmq</groupId>
+                <artifactId>rocketmq-acl</artifactId>
+                <version>${rocketmq.version}</version>
+            </dependency>
+
+            <!-- 内部模块：统一版本，便于 IDEA / Maven 解析模块依赖 -->
+            <dependency>
+                <groupId>com.example</groupId>
+                <artifactId>mall-order-milvus-rag</artifactId>
+                <version>0.0.1-SNAPSHOT</version>
+            </dependency>
+            <dependency>
+                <groupId>com.example</groupId>
+                <artifactId>mall-order-memory</artifactId>
+                <version>0.0.1-SNAPSHOT</version>
+            </dependency>
+            <dependency>
+                <groupId>com.example</groupId>
+                <artifactId>mall-order-observability</artifactId>
+                <version>0.0.1-SNAPSHOT</version>
+            </dependency>
+            <dependency>
+                <groupId>com.css</groupId>
+                <artifactId>mall-order-agent</artifactId>
+                <version>0.0.1-SNAPSHOT</version>
             </dependency>
 
         </dependencies>

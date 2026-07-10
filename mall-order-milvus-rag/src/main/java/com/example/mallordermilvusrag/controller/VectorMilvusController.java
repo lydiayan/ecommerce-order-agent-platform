@@ -3,6 +3,7 @@ package com.example.mallordermilvusrag.controller;
 import com.example.mallordermilvusrag.dto.*;
 import com.example.mallordermilvusrag.service.DocumentImportService;
 import com.example.mallordermilvusrag.service.DocumentService;
+import com.example.mallordermilvusrag.service.RagAskService;
 import com.example.mallordermilvusrag.service.RagService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,13 +29,16 @@ public class VectorMilvusController {
     private final RagService ragService;
     private final DocumentService documentService;
     private final DocumentImportService documentImportService;
+    private final RagAskService ragAskService;
 
     public VectorMilvusController(RagService ragService,
                                   DocumentService documentService,
-                                  DocumentImportService documentImportService) {
+                                  DocumentImportService documentImportService,
+                                  RagAskService ragAskService) {
         this.ragService = ragService;
         this.documentService = documentService;
         this.documentImportService = documentImportService;
+        this.ragAskService = ragAskService;
     }
 
     @GetMapping("/health")
@@ -107,22 +111,24 @@ public class VectorMilvusController {
 
     @PostMapping("/search")
     public ApiResponse<SearchResponse> search(@RequestBody SearchRequest request) {
-        log.info("POST /vector/milvus/search - query='{}', topK={}, roleFilter='{}'",
-                request.getQuery(), request.getTopK(), request.getRoleFilter());
+        log.info("POST /vector/milvus/search - query='{}', topK={}, roleFilter='{}', enableRerank='{}'",
+                request.getQuery(), request.getTopK(), request.getRoleFilter(), request.getEnableRerank());
 
-        String filterExpr = RagService.buildFilterExpression(
-                request.getSourceFilter(),
-                request.getDepartmentFilter(),
-                request.getRoleFilter(),
-                request.getVersionFilter()
-        );
+        SearchResponse response = ragService.search(request);
 
-        double threshold = request.getSimilarityThreshold() != null
-                ? request.getSimilarityThreshold() : 0.0;
+        return ApiResponse.success(response);
+    }
 
-        SearchResponse response = ragService.searchWithFilter(
-                request.getQuery(), request.getTopK(), threshold, filterExpr);
-
+    /**
+     * RAG 问答：Milvus 召回 → qwen3-rerank → Qwen 生成回答。
+     * <p>
+     * 请求体与 {@link #search(SearchRequest)} 相同，{@code query} 为用户问题。
+     */
+    @PostMapping("/ask")
+    public ApiResponse<AskResponse> ask(@RequestBody SearchRequest request) {
+        log.info("POST /vector/milvus/ask - query='{}', roleFilter='{}'",
+                request.getQuery(), request.getRoleFilter());
+        AskResponse response = ragAskService.ask(request);
         return ApiResponse.success(response);
     }
 

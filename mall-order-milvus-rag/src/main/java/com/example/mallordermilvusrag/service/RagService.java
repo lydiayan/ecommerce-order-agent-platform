@@ -1,7 +1,12 @@
 package com.example.mallordermilvusrag.service;
 
+import com.example.mallordermilvusrag.config.RagDocumentProperties;
 import com.example.mallordermilvusrag.dto.DocumentMetadata;
+import com.example.mallordermilvusrag.dto.SearchRequest;
 import com.example.mallordermilvusrag.dto.SearchResponse;
+import com.example.mallordermilvusrag.tracing.RagTraceOperations;
+import com.example.mallorderobservability.trace.RagTraceScope;
+import com.example.mallorderobservability.trace.RagTraceService;
 import io.milvus.client.MilvusServiceClient;
 import io.milvus.common.clientenum.ConsistencyLevelEnum;
 import io.milvus.grpc.DataType;
@@ -43,15 +48,24 @@ public class RagService {
     private final MilvusServiceClient milvusClient;
     private final EmbeddingModel embeddingModel;
     private final DocumentService documentService;
+    private final DashScopeRerankService rerankService;
+    private final RagDocumentProperties ragDocumentProperties;
+    private final RagTraceService ragTraceService;
 
     private volatile boolean collectionReady = false;
 
     public RagService(MilvusServiceClient milvusClient,
                       EmbeddingModel embeddingModel,
-                      DocumentService documentService) {
+                      DocumentService documentService,
+                      DashScopeRerankService rerankService,
+                      RagDocumentProperties ragDocumentProperties,
+                      RagTraceService ragTraceService) {
         this.milvusClient = milvusClient;
         this.embeddingModel = embeddingModel;
         this.documentService = documentService;
+        this.rerankService = rerankService;
+        this.ragDocumentProperties = ragDocumentProperties;
+        this.ragTraceService = ragTraceService;
     }
 
     // ==================== 集合初始化 ====================
@@ -281,37 +295,154 @@ public class RagService {
      * 语义搜索（不带标量过滤）
      */
     public SearchResponse search(String query, int topK) {
-        return searchInternal(query, topK, 0.0, null);
+        SearchRequest request = new SearchRequest(query, topK);
+        return search(request);
     }
 
     /**
      * 带相似度阈值的语义搜索（不带标量过滤）
      */
     public SearchResponse searchWithThreshold(String query, int topK, double similarityThreshold) {
-        return searchInternal(query, topK, similarityThreshold, null);
+        SearchRequest request = new SearchRequest(query, topK);
+        request.setSimilarityThreshold(similarityThreshold);
+        return search(request);
     }
 
     /**
      * 带标量过滤的语义搜索
-     *
-     * @param query      查询文本
-     * @param topK       top-K
-     * @param threshold  相似度阈值
-     * @param filterExpr Milvus 标量过滤表达式，如 {@code role == "客服"}，传 null 表示不过滤
      */
     public SearchResponse searchWithFilter(String query, int topK, double threshold, String filterExpr) {
-        return searchInternal(query, topK, threshold, filterExpr);
+        SearchRequest request = new SearchRequest(query, topK);
+        request.setSimilarityThreshold(threshold);
+        if (!ragTraceService.isEnabled()) {
+            return searchInternal(request, filterExpr, RagTraceScope.noop());
+        }
+        return search(request);
     }
 
-    private SearchResponse searchInternal(String query, int topK, double threshold, String filterExpr) {
-        if (!collectionReady) {
-            log.warn("Collection not ready, returning empty results");
-            return new SearchResponse(query, 0, List.of());
+    /**
+     * 完整搜索：Milvus 召回 →（可选）qwen3-rerank 重排序。
+     */
+    public SearchResponse search(SearchRequest request) {
+        return search(request, null);
+    }
+
+    /**
+     * 在已有 trace 下执行搜索（用于 rag.ask 的 retrieve 子 span）。
+     */
+    public SearchResponse search(SearchRequest request, RagTraceScope parentTrace) {
+        String filterExpr = buildFilterExpression(
+                request.getSourceFilter(),
+                request.getDepartmentFilter(),
+                request.getRoleFilter(),
+                request.getVersionFilter()
+        );
+        if (!ragTraceService.isEnabled()) {
+            return searchInternal(request, filterExpr, RagTraceScope.noop());
         }
 
-        log.info("Search: query='{}', topK={}, threshold={}, filter='{}'", query, topK, threshold, filterExpr);
+        if (parentTrace != null && parentTrace != RagTraceScope.noop()) {
+            SearchResponse response = searchInternal(request, filterExpr, parentTrace);
+            parentTrace.attribute("hitCount", response.getTotalHits());
+            parentTrace.attribute("reranked", response.isReranked());
+            return response;
+        }
 
-        List<Float> queryVector = generateEmbedding(query);
+        Map<String, Object> attrs = new LinkedHashMap<>();
+        attrs.put("query", request.getQuery());
+        attrs.put("topK", request.getTopK());
+        attrs.put("enableRerank", request.getEnableRerank());
+
+        try (RagTraceScope trace = ragTraceService.begin("rag.search", attrs)) {
+            SearchResponse response = searchInternal(request, filterExpr, trace);
+            response.setTraceId(trace.traceId());
+            trace.attribute("hitCount", response.getTotalHits());
+            trace.attribute("reranked", response.isReranked());
+            return response;
+        }
+    }
+
+    private SearchResponse searchInternal(SearchRequest request, String filterExpr, RagTraceScope trace) {
+        if (!collectionReady) {
+            log.warn("Collection not ready, returning empty results");
+            return new SearchResponse(request.getQuery(), 0, false, List.of());
+        }
+
+        int topK = Math.max(request.getTopK(), 1);
+        double vectorThreshold = request.getSimilarityThreshold() != null
+                ? request.getSimilarityThreshold() : 0.0;
+
+        RagDocumentProperties.RerankProperties rerankProps = ragDocumentProperties.getRerank();
+        boolean enableRerank = request.getEnableRerank() != null
+                ? request.getEnableRerank() : rerankProps.isEnabled();
+        int recallTopK = request.getRecallTopK() != null
+                ? request.getRecallTopK()
+                : topK * Math.max(rerankProps.getCandidateMultiplier(), 1);
+        int rerankTopN = request.getRerankTopN() != null ? request.getRerankTopN() : topK;
+        double rerankMinScore = request.getRerankMinScore() != null
+                ? request.getRerankMinScore() : rerankProps.getMinScore();
+
+        int milvusTopK = enableRerank ? Math.max(recallTopK, topK) : topK;
+
+        log.info("Search: query='{}', topK={}, recallTopK={}, rerank={}, threshold={}, filter='{}'",
+                request.getQuery(), topK, milvusTopK, enableRerank, vectorThreshold, filterExpr);
+
+        List<Float> queryVector = generateEmbedding(request.getQuery());
+
+        List<SearchResponse.SearchHit> vectorHits;
+        try (RagTraceScope milvusSpan = trace.child(RagTraceOperations.MILVUS, Map.of(
+                "topK", milvusTopK,
+                "filter", filterExpr != null ? filterExpr : ""))) {
+            vectorHits = queryMilvus(milvusTopK, vectorThreshold, filterExpr, queryVector);
+            milvusSpan.attribute("recallCount", vectorHits.size());
+        }
+
+        if (!enableRerank || vectorHits.isEmpty()) {
+            List<SearchResponse.SearchHit> hits = vectorHits.size() > topK
+                    ? vectorHits.subList(0, topK) : vectorHits;
+            return new SearchResponse(request.getQuery(), hits.size(), false, hits);
+        }
+
+        List<String> documents = vectorHits.stream()
+                .map(SearchResponse.SearchHit::getContent)
+                .toList();
+        List<DashScopeRerankService.RerankItem> rerankItems;
+        try (RagTraceScope rerankSpan = trace.child(RagTraceOperations.RERANK, Map.of(
+                "candidateCount", documents.size(),
+                "rerankTopN", rerankTopN))) {
+            rerankItems = rerankService.rerank(request.getQuery(), documents, rerankTopN);
+            rerankSpan.attribute("resultCount", rerankItems.size());
+        }
+
+        if (rerankItems.isEmpty()) {
+            log.warn("Rerank skipped or failed, fallback to vector ranking");
+            List<SearchResponse.SearchHit> hits = vectorHits.size() > topK
+                    ? vectorHits.subList(0, topK) : vectorHits;
+            return new SearchResponse(request.getQuery(), hits.size(), false, hits);
+        }
+
+        List<SearchResponse.SearchHit> rerankedHits = new ArrayList<>();
+        for (DashScopeRerankService.RerankItem item : rerankItems) {
+            if (item.score() < rerankMinScore) {
+                continue;
+            }
+            SearchResponse.SearchHit original = vectorHits.get(item.index());
+            rerankedHits.add(new SearchResponse.SearchHit(
+                    original.getId(),
+                    original.getContent(),
+                    item.score(),
+                    original.getVectorScore(),
+                    item.score(),
+                    original.getMetadata()
+            ));
+        }
+
+        log.info("Search returned {} hit(s) after rerank", rerankedHits.size());
+        return new SearchResponse(request.getQuery(), rerankedHits.size(), true, rerankedHits);
+    }
+
+    private List<SearchResponse.SearchHit> queryMilvus(int topK, double threshold,
+                                                        String filterExpr, List<Float> queryVector) {
 
         List<String> outputFields = List.of("id", "content", "source", "department",
                 "role", "version", "create_time");
@@ -333,7 +464,7 @@ public class RagService {
         R<SearchResults> searchResult = milvusClient.search(searchBuilder.build());
         if (searchResult.getStatus() != R.Status.Success.getCode()) {
             log.warn("Search failed: {}", searchResult.getMessage());
-            return new SearchResponse(query, 0, List.of());
+            return List.of();
         }
 
         SearchResultsWrapper wrapper = new SearchResultsWrapper(searchResult.getData().getResults());
@@ -375,6 +506,8 @@ public class RagService {
                         safeGet(ids, i, ""),
                         safeGet(contents, i, ""),
                         score,
+                        score,
+                        null,
                         meta
                 ));
             }
@@ -382,8 +515,8 @@ public class RagService {
             log.warn("Error parsing search results: {}", e.getMessage());
         }
 
-        log.info("Search returned {} hits after threshold filter", hits.size());
-        return new SearchResponse(query, hits.size(), hits);
+        log.info("Milvus returned {} hit(s) after vector threshold filter", hits.size());
+        return hits;
     }
 
     // ==================== 工具方法 ====================

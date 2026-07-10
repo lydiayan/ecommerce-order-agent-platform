@@ -16,6 +16,10 @@ spring:
       embedding:
         options:
           model: text-embedding-v2
+      chat:
+        options:
+          model: qwen-plus
+          temperature: 0.3
 
 # 若想使用 DeepSeek Embedding，确保 DEEPSEEK_API_KEY 有效且可访问 /v1/embeddings 端点
 #spring:
@@ -26,3 +30,20 @@ spring:
 #      embedding:
 #        options:
 #          model: deepseek-embedding
+
+observability:
+  enabled: true
+  service-name: mall-order-milvus-rag
+  producer:
+    enabled: true
+  consumer:
+    enabled: false
+  trace:
+    topic: rag-trace-events
+    tag: trace
+
+rocketmq:
+  name-server: 127.0.0.1:9876
+  producer:
+    group: rag-trace-producer
+    send-message-timeout: 3000
