@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>EcommSpringBot 智能客服</title>
+  <link rel="stylesheet" href="/style.css"/>
+</head>
+<body>
+<header class="header">
+  <div class="brand">
+    <span class="logo">E</span>
+    <div>
+      <h1>智能客服</h1>
+      <p class="subtitle">订单问答 · 知识库 RAG</p>
+    </div>
+  </div>
+  <div class="status" id="statusBadge">
+    <span class="dot"></span>
+    <span id="statusText">连接中…</span>
+  </div>
+</header>
+
+<main class="layout">
+  <section class="panel chat-panel">
+    <div class="panel-head">
+      <h2>对话</h2>
+      <div class="chips">
+        <button type="button" class="chip" data-query="查询我的订单">查我的订单</button>
+        <button type="button" class="chip" data-query="退款规则是什么">退款规则</button>
+        <button type="button" class="chip" data-query="物流配送时效">物流时效</button>
+      </div>
+    </div>
+    <div class="messages" id="messages"></div>
+    <form class="input-row" id="chatForm">
+      <input type="text" id="queryInput" placeholder="输入问题，例如：查询订单 ORD20250101120000" autocomplete="off"/>
+      <button type="submit" class="btn btn-primary" id="sendBtn">发送</button>
+    </form>
+  </section>
+
+  <aside class="panel order-panel">
+    <div class="panel-head">
+      <h2>我的订单</h2>
+      <button type="button" class="btn btn-ghost btn-sm" id="refreshOrders">刷新</button>
+    </div>
+    <div class="user-row">
+      <label for="userIdInput">用户 ID</label>
+      <input type="text" id="userIdInput" value="USER1005" placeholder="USER1005"/>
+    </div>
+    <div class="order-list" id="orderList">
+      <p class="empty">加载中…</p>
+    </div>
+  </aside>
+</main>
+
+<script src="/app.js?v=20260709c"></script>
+</body>
+</html>

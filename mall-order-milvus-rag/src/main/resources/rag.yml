@@ -1,0 +1,73 @@
+# RAG 专用配置：Milvus 向量库 + 文档 catalog
+# 由 application.yml 通过 spring.config.import 引入
+
+spring:
+  ai:
+    vectorstore:
+      milvus:
+        host: localhost
+        port: 19530
+        collection-name: mall_rag_collection
+        dimensions: 1536
+        index-type: IVF_FLAT
+        metric-type: COSINE
+        initialize-schema: true
+
+# catalog 使用 List（含 filename 字段），避免文件名中的 "." 导致配置绑定失败
+rag:
+  data-dir: data
+  chunk:
+    chunk-size: 250
+    min-chunk-size-chars: 80
+    min-chunk-length-to-embed: 5
+    max-num-chunks: 10000
+    keep-separator: true
+  rerank:
+    enabled: true
+    model: qwen3-rerank
+    base-url: https://dashscope.aliyuncs.com/compatible-api/v1/reranks
+    candidate-multiplier: 3
+    min-score: 0.0
+    instruct: "Given a web search query, retrieve relevant passages that answer the query."
+  ask:
+    model: qwen-plus
+    temperature: 0.3
+    context-top-k: 5
+    prompt-version: v1
+    system-prompt: |
+      你是企业知识库问答助手。请严格根据用户消息中「参考资料」回答问题。
+      要求：
+      1. 仅使用参考资料中的信息，不要编造。
+      2. 若参考资料不足以回答，请明确回复「知识库中未找到相关信息」。
+      3. 回答简洁、准确，可使用条目列表。
+      4. 不要透露参考资料的编号或内部字段名。
+
+  catalog:
+    - filename: 01_HR员工手册.pdf
+      department: HR
+      role: hr
+      version: "3.2"
+    - filename: 02_财务制度.pdf
+      department: Finance
+      role: finance
+      version: "2.1"
+    - filename: 03_电商订单规则.pdf
+      department: Operations
+      role: public
+      version: "5.0"
+    - filename: 04_物流规则.pdf
+      department: Logistics
+      role: public
+      version: "3.0"
+    - filename: 05_客服处理手册.pdf
+      department: CustomerService
+      role: customer_service
+      version: "4.1"
+    - filename: 06_技术开发规范.pdf
+      department: Engineering
+      role: developer
+      version: "2.4"
+    - filename: 07_AI_Agent运维手册.pdf
+      department: Platform
+      role: admin
+      version: "1.3"

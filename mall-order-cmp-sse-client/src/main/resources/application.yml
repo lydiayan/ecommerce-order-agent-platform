@@ -1,0 +1,97 @@
+server:
+  port: 8888
+  servlet:
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
+
+spring:
+  application:
+    name: mall-order-cmp-sse-client
+  config:
+    import: optional:nacos:${spring.application.name}.yml
+  #main:
+  #web-application-type: none
+#  cloud:
+#    nacos:
+#      discovery:
+#        server-addr: localhost:8848
+#        namespace: public
+#        group: DEFAULT_GROUP
+#        enabled: true
+#        username: nacos  # 添加账号
+#        password: nacos  # 添加密码
+#      config:
+#        server-addr: localhost:8848
+#        namespace: public
+#        group: DEFAULT_GROUP
+#        file-extension: yaml
+#        enabled: true
+#        username: nacos  # 添加账号
+#        password: nacos  # 添加密码
+#        shared-configs:
+#          - data-id: common-config.yaml
+#            group: DEFAULT_GROUP
+#            refresh: true
+#  ai:
+#    alibaba:
+#      agent:
+#        studio:
+#          enabled: false
+#      # 聊天模型配置 - 用于最终生成回答
+#      chat:
+#        options:
+#          model: qwen-max  # 可选: qwen-max, qwen-turbo, qwen-plus 等
+#      # 向量模型配置 - 用于将查询转换为向量进行检索
+#      embedding:
+#        options:
+#          model: qwen2.5-vl-embedding
+#    mcp:
+#      client:
+#        toolcallback:
+#          enabled: true
+#        sse:
+#          connections:
+#            server1:
+#              url: http://localhost:8082
+#      security:
+#        enabled: true
+#        token: yingzi-1                     # token 值
+#        token-header: token-1               # token 所在的 Header 名
+#    memory:
+#      redis:
+#        host: 127.0.0.1
+#        port: 6379
+#        password: ""
+#        timeout: 2000
+#    # Elasticsearch 配置
+#    elasticsearch:
+#      uris: http://127.0.0.1:9200
+#      username:  # 可选，如果 ES 需要认证
+#      password:  # 可选，如果 ES 需要认证
+#    # VectorStore 配置
+#    vectorstore:
+#      elasticsearch:
+#        # 是否自动初始化 schema（索引结构）
+#        initialize-schema: true
+#        # 向量索引名称
+#        index-name: mall-vector
+#        # 相似度计算方式：cosine（余弦相似度）、dot_product（点积）、l2_norm（L2 范数）
+#        similarity: cosine
+#        # 向量维度，需要与 embedding 模型的输出维度匹配
+#        # qwen2.5-vl-embedding 的维度是 1536
+#        dimensions: 1536
+#    dashscope:
+#      api-key: ${DASHSCOPE_API_KEY}
+#  mandatory-file-encoding: UTF-8
+
+# ????
+logging:
+  level:
+    org.springframework.ai: DEBUG
+    com.alibaba.cloud.ai: DEBUG
+    org.springframework.ai.mcp: TRACE
+ai:
+  user:
+    input: ????????

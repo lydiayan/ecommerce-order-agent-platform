@@ -1,0 +1,81 @@
+server:
+  port: 8087
+
+spring:
+  application:
+    name: mall-order-agent
+
+  config:
+    import: classpath:rag.yml
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/agent_memory?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: root
+    password: root
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  ai:
+    openai:
+      api-key: ${DASHSCOPE_API_KEY}
+      base-url: https://dashscope.aliyuncs.com/compatible-mode
+      embedding:
+        options:
+          model: text-embedding-v2
+      chat:
+        options:
+          model: qwen-plus
+          temperature: 0.3
+
+observability:
+  enabled: true
+  service-name: mall-order-agent
+  producer:
+    enabled: true
+  consumer:
+    enabled: false
+  trace:
+    topic: rag-trace-events
+    tag: trace
+
+rocketmq:
+  name-server: 127.0.0.1:9876
+  producer:
+    group: rag-trace-producer-agent
+    send-message-timeout: 3000
+
+agent:
+  conversation:
+    max-turns: 10
+  graph:
+    human-review-enabled: true # 敏感操作人工审核（退货/付款/删除/确认类回复）
+  order:
+    base-url: http://127.0.0.1:8081
+
+memory:
+  enabled: true
+  user-id: default_user
+  conversation-id: default
+  short-term:
+    max-size: 20
+    key-prefix: memory:short
+    cursor-key-prefix: memory:consolidate:cursor
+    ttl-seconds: 604800
+    redis:
+      host: localhost
+      port: 6379
+      connection-timeout-ms: 5000
+  long-term:
+    dimension: 1536
+    milvus:
+      host: localhost
+      port: 19530
+  extractor:
+    enabled: true
+  consolidation:
+    enabled: true
+    interval-ms: 300000
+    min-messages: 4
+    message-threshold: 10
+    token-threshold: 800
+  user-profile:
+    enabled: true

@@ -1,0 +1,35 @@
+# mall-order-memory 模块配置
+memory:
+  enabled: true
+  user-id: default_user
+  conversation-id: default_conversation
+
+  short-term:
+    max-size: 20
+    key-prefix: memory:short
+    cursor-key-prefix: memory:consolidate:cursor
+    ttl-seconds: 604800
+    redis:
+      host: localhost
+      port: 6379
+      connection-timeout-ms: 5000
+
+  long-term:
+    dimension: 1536
+    milvus:
+      host: localhost
+      port: 19530
+
+  extractor:
+    enabled: true
+    model: qwen-max
+
+  consolidation:
+    enabled: true
+    interval-ms: 300000
+    min-messages: 4
+    message-threshold: 10
+    token-threshold: 800
+
+  user-profile:
+    enabled: true

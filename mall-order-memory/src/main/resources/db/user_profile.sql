@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS `user_profile` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    `user_id` VARCHAR(64) NOT NULL COMMENT '用户唯一标识',
+    `occupation` VARCHAR(100) DEFAULT NULL COMMENT '职业，如Java开发工程师、HR',
+    `department` VARCHAR(100) DEFAULT NULL COMMENT '所属部门',
+    `city` VARCHAR(100) DEFAULT NULL COMMENT '所在城市',
+    `language` VARCHAR(50) DEFAULT 'zh-CN' COMMENT '常用语言',
+    `response_style` VARCHAR(100) DEFAULT NULL COMMENT '回复风格，例如详细、简洁、偏技术',
+    `profile_json` JSON DEFAULT NULL COMMENT '用户画像(JSON)，包含兴趣、技能、长期目标、偏好等',
+    `confidence` DECIMAL(4,3) DEFAULT 0.500 COMMENT '画像可信度(0~1)',
+    `version` INT DEFAULT 1 COMMENT '画像版本号，每次Merge后递增',
+    `source` VARCHAR(50) DEFAULT 'conversation' COMMENT '画像来源(conversation/tool/manual/import)',
+    `last_conversation_id` VARCHAR(64) DEFAULT NULL COMMENT '最后一次更新画像的会话ID',
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_user_id` (`user_id`),
+    INDEX `idx_city` (`city`),
+    INDEX `idx_department` (`department`),
+    INDEX `idx_updated_at` (`updated_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Agent用户画像';
