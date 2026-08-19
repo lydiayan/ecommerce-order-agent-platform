@@ -4,6 +4,26 @@
 
 > 项目定位：不是通用聊天机器人，而是一条可解释、可回归、可人工接管的订单 Agent 执行链。
 
+## 项目演进
+
+本项目由 `EcommSpringBot` 持续重构而来，不是一次性创建的新仓库。原型阶段的 18 个提交完整保留在当前 Git 历史中，重构前基线标记为 `ecommspringbot-v1`；后续提交记录从实验型商城助手收敛为可验证的订单 Agent 平台。
+
+| 演进维度 | EcommSpringBot 原型 | 当前平台 |
+| --- | --- | --- |
+| 模块边界 | 多个独立实验模块和重复 Wrapper | 订单、MCP、Observability、RAG、Memory、Agent 六个核心模块 |
+| Agent 编排 | Function Calling 与早期 StateGraph 实验 | 确定性 Planner、动作链、Graph checkpoint、人工中断与恢复 |
+| 业务安全 | 主要验证自然语言订单操作 | 服务端身份、能力边界、订单归属、敏感操作确认和安全审计 |
+| RAG 与记忆 | 独立服务原型 | 作为 Agent 依赖组合，统一权限范围和 Trace 契约 |
+| 质量闭环 | 以接口和日志验证为主 | 单元/集成测试、端到端 smoke、RocketMQ + Elasticsearch Trace、AgentInsight 评测 |
+| 交付方式 | 子模块分别启动 | 根 Reactor、Docker Compose、统一脚本和 CI |
+
+可以使用以下命令审查演进过程，而不只查看最终代码：
+
+```bash
+git log --oneline --decorate --graph --all
+git diff ecommspringbot-v1..HEAD --stat
+```
+
 ## 核心能力
 
 - **确定性规划**：按问题路由到订单查询、RAG 问答、记忆或敏感订单操作。
