@@ -6,6 +6,9 @@ import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.RunnableConfig;
 import com.alibaba.cloud.ai.graph.action.InterruptionMetadata;
 import com.css.mallorderagent.config.OrderAgentProperties;
+import com.css.mallorderagent.demo.DemoActorContext;
+import com.css.mallorderagent.demo.DemoPersonaService;
+import com.css.mallorderagent.dto.AbandonConversationRequest;
 import com.css.mallorderagent.dto.AskRequest;
 import com.css.mallorderagent.dto.HumanFeedbackRequest;
 import com.css.mallorderagent.dto.OrderAgentResponse;
@@ -13,17 +16,22 @@ import com.css.mallorderagent.graph.AgentGraphKeys;
 import com.css.mallorderagent.graph.AgentGraphSupport;
 import com.css.mallorderagent.planner.HumanApprovalDetector;
 import com.css.mallorderagent.planner.HumanApprovalDetector.ConfirmationIntent;
+import com.css.mallorderagent.planner.PlanResult;
 import com.example.mallordermemory.memory.HybridMemoryManager;
 import com.example.mallordermilvusrag.dto.SearchResponse;
 import com.example.mallordermilvusrag.tracing.RagTracingAdvisor;
 import com.example.mallorderobservability.trace.RagTraceScope;
 import com.example.mallorderobservability.trace.RagTraceService;
+import com.example.mallorderobservability.trace.TracePrivacy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * 订单 Agent 入口：Planner → ActionRunner 动态调度 → Prompt → LLM → Human → Answer。
@@ -38,38 +46,52 @@ public class OrderAgentService {
     private final OrderAgentProperties orderAgentProperties;
     private final RagTraceService ragTraceService;
     private final PendingConfirmationService pendingConfirmationService;
+    private final DemoPersonaService demoPersonaService;
 
     public OrderAgentService(CompiledGraph orderAgentCompiledGraph,
                              HybridMemoryManager hybridMemoryManager,
                              OrderAgentProperties orderAgentProperties,
                              RagTraceService ragTraceService,
-                             PendingConfirmationService pendingConfirmationService) {
+                             PendingConfirmationService pendingConfirmationService,
+                             DemoPersonaService demoPersonaService) {
         this.orderAgentCompiledGraph = orderAgentCompiledGraph;
         this.hybridMemoryManager = hybridMemoryManager;
         this.orderAgentProperties = orderAgentProperties;
         this.ragTraceService = ragTraceService;
         this.pendingConfirmationService = pendingConfirmationService;
+        this.demoPersonaService = demoPersonaService;
     }
 
-    public OrderAgentResponse ask(AskRequest request) {
-        validateAsk(request);
-        String userId = resolveUserId(request);
-        String sessionId = resolveSessionId(request);
+    public OrderAgentResponse ask(AskRequest request, String actorUserId) {
+        return ask(request, actorUserId, true);
+    }
 
-        if (pendingConfirmationService.isAwaiting(sessionId)) {
-            return handlePendingConfirmationReply(request, userId, sessionId);
+    public OrderAgentResponse ask(AskRequest request, String actorUserId,
+                                  boolean sensitiveConfirmationAllowed) {
+        validateAsk(request);
+        String userId = requireActorUserId(actorUserId);
+        sanitizeUntrustedRequest(request);
+        String sessionId = resolveSessionId(request);
+        String threadId = threadId(userId, sessionId);
+
+        if (pendingConfirmationService.isAwaiting(threadId)) {
+            ConfirmationIntent intent = HumanApprovalDetector.parseUserConfirmationIntent(request.getQuery());
+            if (!sensitiveConfirmationAllowed && intent != ConfirmationIntent.UNKNOWN) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                        "当前身份不能确认或取消敏感业务操作");
+            }
+            return handlePendingConfirmationReply(request, userId, sessionId, threadId);
         }
 
         if (!ragTraceService.isEnabled()) {
-            return askInternal(request, userId, sessionId, RagTraceScope.noop());
+            return askInternal(request, userId, sessionId, threadId, RagTraceScope.noop());
         }
 
-        Map<String, Object> attrs = Map.of(
-                "query", request.getQuery(),
-                "userId", userId,
-                "sessionId", sessionId);
+        Map<String, Object> attrs = baseTraceAttributes(sessionId, userId);
+        attrs.put("queryLength", request.getQuery().trim().length());
+        attrs.put("queryFingerprint", TracePrivacy.fingerprint(request.getQuery().trim()));
         try (RagTraceScope trace = ragTraceService.begin("agent.ask", attrs)) {
-            OrderAgentResponse response = askInternal(request, userId, sessionId, trace);
+            OrderAgentResponse response = askInternal(request, userId, sessionId, threadId, trace);
             response.setTraceId(trace.traceId());
             if (response.getRetrieval() != null) {
                 response.getRetrieval().setTraceId(trace.traceId());
@@ -77,14 +99,50 @@ public class OrderAgentService {
             trace.attribute("grounded", response.isGrounded());
             trace.attribute("planStrategy", response.getPlanStrategy());
             trace.attribute("interrupted", response.isInterrupted());
+            trace.attribute("responseLength", response.getAnswer() != null ? response.getAnswer().length() : 0);
             return response;
         }
     }
 
-    public OrderAgentResponse resume(HumanFeedbackRequest request) {
+    public OrderAgentResponse resume(HumanFeedbackRequest request, String actorUserId) {
         validateResume(request);
         String threadId = request.getThreadId().trim();
-        pendingConfirmationService.clear(threadId);
+        PendingConfirmationService.PendingConfirmation pending = pendingConfirmationService.find(threadId)
+                .filter(value -> value.userId().equals(actorUserId))
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
+
+        if (!ragTraceService.isEnabled()) {
+            return resumeInternal(request, threadId, RagTraceScope.noop());
+        }
+
+        Map<String, Object> attrs = baseTraceAttributes(threadId, pending.userId());
+        attrs.put("approved", Boolean.TRUE.equals(request.getApproved()));
+        if (pending.sourceTraceId() != null) {
+            attrs.put("continuedFromTraceId", pending.sourceTraceId());
+        }
+        try (RagTraceScope trace = ragTraceService.begin("agent.resume", attrs)) {
+            OrderAgentResponse response = resumeInternal(request, threadId, trace);
+            response.setTraceId(trace.traceId());
+            trace.attribute("grounded", response.isGrounded());
+            trace.attribute("planStrategy", response.getPlanStrategy());
+            trace.attribute("interrupted", response.isInterrupted());
+            trace.attribute("responseLength", response.getAnswer() != null ? response.getAnswer().length() : 0);
+            return response;
+        }
+    }
+
+    public boolean abandon(AbandonConversationRequest request, String actorUserId) {
+        if (request == null || request.getThreadId() == null || request.getThreadId().isBlank()) {
+            throw new IllegalArgumentException("threadId must not be blank");
+        }
+        PendingConfirmationService.PendingConfirmation pending = pendingConfirmationService.find(request.getThreadId())
+                .filter(value -> value.userId().equals(actorUserId))
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
+        pendingConfirmationService.clear(pending.conversationId());
+        return true;
+    }
+
+    private OrderAgentResponse resumeInternal(HumanFeedbackRequest request, String threadId, RagTraceScope trace) {
         Map<String, Object> feedback = buildHumanFeedback(request);
 
         RunnableConfig resumeConfig = RunnableConfig.builder()
@@ -96,18 +154,25 @@ public class OrderAgentService {
         log.info("Resume graph, threadId={}, approved={}, revised={}",
                 threadId, request.getApproved(), request.getRevisedQuery() != null);
 
-        GraphRunResult runResult = runGraph(Map.of(), resumeConfig);
-        OrderAgentResponse response = toResponse(runResult.state(), runResult.interrupted(), threadId);
-        if (runResult.interrupted()) {
-            response.setInterruptMessage(readInterruptMessage(runResult.output()));
+        RagTracingAdvisor.bindParentScope(trace);
+        try {
+            GraphRunResult runResult = runGraph(Map.of(), resumeConfig);
+            OrderAgentResponse response = toResponse(runResult.state(), runResult.interrupted(), threadId);
+            if (runResult.interrupted()) {
+                response.setInterruptMessage(readInterruptMessage(runResult.output()));
+            } else {
+                pendingConfirmationService.clear(threadId);
+            }
+            return response;
+        } finally {
+            RagTracingAdvisor.clearParentScope();
         }
-        return response;
     }
 
-    private OrderAgentResponse askInternal(AskRequest request, String userId, String sessionId, RagTraceScope trace) {
+    private OrderAgentResponse askInternal(AskRequest request, String userId, String sessionId,
+                                           String threadId, RagTraceScope trace) {
         Map<String, Object> inputs = buildGraphInputs(request, userId, sessionId);
 
-        String threadId = sessionId;
         RunnableConfig config = RunnableConfig.builder().threadId(threadId).build();
         RagTracingAdvisor.bindParentScope(trace);
         try {
@@ -117,9 +182,10 @@ public class OrderAgentService {
                 response.setInterruptMessage(readInterruptMessage(runResult.output()));
                 log.info("Graph interrupted before human review, threadId={}, answerLength={}",
                         threadId, response.getAnswer() != null ? response.getAnswer().length() : 0);
-                finalizeAwaitingConfirmation(response, userId, sessionId, request.getQuery().trim());
+                finalizeAwaitingConfirmation(
+                        response, userId, sessionId, threadId, request.getQuery().trim(), trace.traceId());
             } else {
-                pendingConfirmationService.clear(sessionId);
+                pendingConfirmationService.clear(threadId);
             }
             return response;
         } finally {
@@ -142,6 +208,13 @@ public class OrderAgentService {
         inputs.put(AgentGraphKeys.USER_ID, userId);
         inputs.put(AgentGraphKeys.SESSION_ID, sessionId);
         inputs.put(AgentGraphKeys.HUMAN_REVIEW_ENABLED, orderAgentProperties.getGraph().isHumanReviewEnabled());
+        DemoActorContext actor = demoPersonaService.resolveActor(userId);
+        inputs.put(AgentGraphKeys.PERSONA_CONTEXT, actor.personaPrompt());
+        inputs.put(AgentGraphKeys.CAPABILITIES,
+                actor.capabilities().stream().map(Enum::name).toList());
+        inputs.put(AgentGraphKeys.AUTHORIZED_CUSTOMER_IDS, actor.authorizedCustomerIds());
+        inputs.put(AgentGraphKeys.RAG_ROLE_SCOPES, actor.roleScopes());
+        inputs.put(AgentGraphKeys.RAG_DEPARTMENT_SCOPES, actor.departmentScopes());
         return inputs;
     }
 
@@ -151,7 +224,10 @@ public class OrderAgentService {
         String answer = state.value(AgentGraphKeys.ANSWER, "");
         boolean grounded = state.value(AgentGraphKeys.GROUNDED, false);
         String planStrategy = state.value(AgentGraphKeys.PLAN_STRATEGY, "RAG_QA");
-        SearchResponse retrieval = state.value(AgentGraphKeys.RETRIEVAL, SearchResponse.class).orElse(null);
+        PlanResult plan = state.value(AgentGraphKeys.PLAN, PlanResult.class).orElse(null);
+        SearchResponse retrieval = plan != null && plan.needRag()
+                ? state.value(AgentGraphKeys.RETRIEVAL, SearchResponse.class).orElse(null)
+                : null;
 
         OrderAgentResponse response = new OrderAgentResponse();
         response.setQuery(query);
@@ -167,36 +243,39 @@ public class OrderAgentService {
         return response;
     }
 
-    private OrderAgentResponse handlePendingConfirmationReply(AskRequest request, String userId, String sessionId) {
+    private OrderAgentResponse handlePendingConfirmationReply(AskRequest request, String userId,
+                                                               String sessionId, String threadId) {
         ConfirmationIntent intent = HumanApprovalDetector.parseUserConfirmationIntent(request.getQuery());
         if (intent == ConfirmationIntent.CONFIRM) {
             HumanFeedbackRequest resumeRequest = new HumanFeedbackRequest();
-            resumeRequest.setThreadId(sessionId);
+            resumeRequest.setThreadId(threadId);
             resumeRequest.setApproved(true);
-            return resume(resumeRequest);
+            return resume(resumeRequest, userId);
         }
         if (intent == ConfirmationIntent.CANCEL) {
             HumanFeedbackRequest resumeRequest = new HumanFeedbackRequest();
-            resumeRequest.setThreadId(sessionId);
+            resumeRequest.setThreadId(threadId);
             resumeRequest.setApproved(false);
-            return resume(resumeRequest);
+            return resume(resumeRequest, userId);
         }
 
-        pendingConfirmationService.clear(sessionId);
+        pendingConfirmationService.clear(threadId);
         log.info("Pending confirmation abandoned, sessionId={}, newQuery='{}'", sessionId, request.getQuery());
-        return askInternal(request, userId, sessionId, RagTraceScope.noop());
+        return askInternal(request, userId, sessionId, threadId, RagTraceScope.noop());
     }
 
     private void finalizeAwaitingConfirmation(OrderAgentResponse response,
                                               String userId,
                                               String sessionId,
-                                              String userQuery) {
+                                              String threadId,
+                                              String userQuery,
+                                              String traceId) {
         if (!response.isInterrupted()
                 || !HumanApprovalDetector.isDangerousOrderOp(response.getPlanStrategy())) {
             return;
         }
         response.setAwaitingUserConfirm(true);
-        pendingConfirmationService.markAwaiting(sessionId);
+        pendingConfirmationService.markAwaiting(threadId, userId, traceId);
         if (response.getAnswer() != null && !response.getAnswer().isBlank()) {
             hybridMemoryManager.addExchange(userId, sessionId, userQuery, response.getAnswer());
         }
@@ -235,16 +314,44 @@ public class OrderAgentService {
 
     private static String resolveSessionId(AskRequest request) {
         if (request.getConversationId() == null || request.getConversationId().isBlank()) {
-            return AgentGraphSupport.DEFAULT_SESSION_ID;
+            return UUID.randomUUID().toString();
         }
-        return request.getConversationId().trim();
+        String value = request.getConversationId().trim();
+        if (value.length() > 128 || !value.matches("[A-Za-z0-9._:-]+")) {
+            throw new IllegalArgumentException("conversationId format is invalid");
+        }
+        return value;
     }
 
-    private String resolveUserId(AskRequest request) {
-        if (request.getUserId() != null && !request.getUserId().isBlank()) {
-            return request.getUserId().trim();
+    private static String requireActorUserId(String actorUserId) {
+        if (actorUserId == null || actorUserId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "authenticated actor is required");
         }
-        return hybridMemoryManager.getDefaultUserId();
+        return actorUserId.trim();
+    }
+
+    static void sanitizeUntrustedRequest(AskRequest request) {
+        request.setUserId(null);
+        request.setActorUserId(null);
+        request.setSourceFilter(null);
+        request.setDepartmentFilter(null);
+        request.setRoleFilter(null);
+        request.setVersionFilter(null);
+        request.setTopK(Math.min(Math.max(request.getTopK(), 1), 10));
+    }
+
+    private static String threadId(String userId, String sessionId) {
+        return userId + "::" + sessionId;
+    }
+
+    private static Map<String, Object> baseTraceAttributes(String conversationId, String userId) {
+        Map<String, Object> attrs = new HashMap<>();
+        attrs.put("traceSchemaVersion", "1.0");
+        attrs.put("agentName", "mall-order-agent");
+        attrs.put("agentVersion", "1.0.0");
+        attrs.put("conversationId", conversationId);
+        attrs.put("userFingerprint", TracePrivacy.fingerprint(userId));
+        return attrs;
     }
 
     private record GraphRunResult(NodeOutput output, OverAllState state, boolean interrupted) {

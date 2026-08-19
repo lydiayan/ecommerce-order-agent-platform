@@ -2,40 +2,15 @@
 spring:
   application:
     name: mall-order-cmp-server
-  config:
-    import: optional:nacos:${spring.application.name}.yml
   main:
     banner-mode: off
-  cloud:
-    nacos:
-      discovery:
-        server-addr: localhost:8848
-        namespace: public
-        group: DEFAULT_GROUP
-        enabled: true
-        username: nacos  # 添加账号
-        password: nacos  # 添加密码
-      config:
-        server-addr: localhost:8848
-        namespace: public
-        group: DEFAULT_GROUP
-        file-extension: yaml
-        enabled: true
-        username: nacos  # 添加账号
-        password: nacos  # 添加密码
-        shared-configs:
-          - data-id: common-config.yaml
-            group: DEFAULT_GROUP
-            refresh: true
   ai:
     mcp:
       server:
         enabled: true
         name: mall-order-cmp-server
-        version: 0.0.1
-        type: ASYNC  # Recommended for reactive applications
-        # ?? sse ????????? /sse
-        # ???????? ip:port/sse/mcp
+        version: 1.0.0
+        type: ASYNC
         sse-endpoint: /sse
         sse-message-endpoint: /mcp
         capabilities:
@@ -44,18 +19,24 @@ spring:
           prompt: true
           completion: true
         cors:
-          allowed-origins: "*"
-          allowed-methods: "*"
-          allowed-headers: "*"
+          allowed-origins: "http://127.0.0.1:8087,http://localhost:8087"
+          allowed-methods: "GET,POST,OPTIONS"
+          allowed-headers: "Content-Type,Accept"
         security:
           enabled: false
 server:
-  port: 8082
+  address: ${SERVER_ADDRESS:127.0.0.1}
+  port: ${SERVER_PORT:8082}
+mall-order:
+  base-url: ${MALL_ORDER_BASE_URL:http://127.0.0.1:8081}
+  service-token: ${MALL_ORDER_SERVICE_TOKEN:local-order-service-token-change-me}
+mcp:
+  auth:
+    token: ${MCP_SERVICE_TOKEN:local-mcp-service-token-change-me}
 logging:
   level:
-    io.modelcontextprotocol: DEBUG
-    org.springframework.ai: DEBUG
-    org.springframework.web: DEBUG
+    io.modelcontextprotocol: INFO
+    org.springframework.ai: INFO
+    org.springframework.web: INFO
 
-  pattern:
-    console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+  pattern.console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"

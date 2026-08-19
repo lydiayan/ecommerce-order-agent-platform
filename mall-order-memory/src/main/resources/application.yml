@@ -10,15 +10,15 @@ memory:
     cursor-key-prefix: memory:consolidate:cursor
     ttl-seconds: 604800
     redis:
-      host: localhost
-      port: 6379
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:16379}
       connection-timeout-ms: 5000
 
   long-term:
     dimension: 1536
     milvus:
-      host: localhost
-      port: 19530
+      host: ${MILVUS_HOST:127.0.0.1}
+      port: ${MILVUS_PORT:29530}
 
   extractor:
     enabled: true

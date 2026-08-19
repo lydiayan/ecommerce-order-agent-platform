@@ -6,10 +6,19 @@ import com.css.mallorderagent.graph.AgentGraphKeys;
 import com.css.mallorderagent.graph.AgentGraphSupport;
 import com.css.mallorderagent.planner.PlanResult;
 import com.css.mallorderagent.planner.Planner;
+import com.css.mallorderagent.planner.HumanApprovalDetector;
+import com.css.mallorderagent.prompt.BuiltPrompt;
+import com.css.mallorderagent.demo.DemoCapability;
+import com.example.mallordermilvusrag.dto.SearchResponse;
+import com.example.mallordermilvusrag.tracing.RagTracingAdvisor;
+import com.example.mallorderobservability.trace.RagTraceScope;
+import com.example.mallorderobservability.trace.TracePrivacy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -31,15 +40,98 @@ public class PlannerNode implements NodeAction {
     @Override
     public Map<String, Object> apply(OverAllState state) {
         String query = AgentGraphSupport.resolveQuery(state);
-        PlanResult plan = planner.plan(query);
+        Map<String, Object> startAttributes = new LinkedHashMap<>();
+        startAttributes.put("queryLength", query.length());
+        startAttributes.put("queryFingerprint", TracePrivacy.fingerprint(query));
+        String conversationId = state.value(AgentGraphKeys.SESSION_ID, "");
+        if (!conversationId.isBlank()) {
+            startAttributes.put("conversationId", conversationId);
+        }
 
-        log.info("PlannerNode completed, strategy={}, actions={}, humanApproval={}",
-                plan.strategy(), plan.actions(), plan.humanApprovalRequired());
+        RagTraceScope trace = RagTracingAdvisor.parentScope();
+        try (RagTraceScope plannerSpan = trace.child(NODE_NAME, startAttributes)) {
+            try {
+                PlanResult plan = planner.plan(query);
+                String denial = capabilityDenial(state, plan, query);
+                if (denial != null) {
+                    PlanResult denied = new PlanResult("CAPABILITY_DENIED", List.of());
+                    Map<String, Object> updates = resetTurnOutputs(query);
+                    updates.put(AgentGraphKeys.PLAN, denied);
+                    updates.put(AgentGraphKeys.PLAN_STRATEGY, denied.strategy());
+                    updates.put(AgentGraphKeys.ANSWER, denial);
+                    return updates;
+                }
+                List<String> actions = plan.actions().stream()
+                        .map(action -> action.action())
+                        .toList();
 
-        return Map.of(
-                AgentGraphKeys.PLAN, plan,
-                AgentGraphKeys.PLAN_STRATEGY, plan.strategy(),
-                AgentGraphKeys.HUMAN_APPROVAL_REQUIRED, plan.humanApprovalRequired(),
-                AgentGraphKeys.APPROVAL_REASON, plan.approvalReason() != null ? plan.approvalReason() : "");
+                plannerSpan.attribute("planStrategy", plan.strategy());
+                plannerSpan.attribute("actionCount", actions.size());
+                plannerSpan.attribute("actions", actions);
+                plannerSpan.attribute("humanApprovalRequired", plan.humanApprovalRequired());
+                if (plan.approvalReason() != null && !plan.approvalReason().isBlank()) {
+                    plannerSpan.attribute("approvalReason", plan.approvalReason());
+                }
+
+                log.info("PlannerNode completed, strategy={}, actions={}, humanApproval={}",
+                        plan.strategy(), plan.actions(), plan.humanApprovalRequired());
+
+                Map<String, Object> updates = resetTurnOutputs(query);
+                updates.put(AgentGraphKeys.PLAN, plan);
+                updates.put(AgentGraphKeys.PLAN_STRATEGY, plan.strategy());
+                updates.put(AgentGraphKeys.HUMAN_APPROVAL_REQUIRED, plan.humanApprovalRequired());
+                updates.put(AgentGraphKeys.APPROVAL_REASON,
+                        plan.approvalReason() != null ? plan.approvalReason() : "");
+                return updates;
+            } catch (RuntimeException e) {
+                plannerSpan.error(e);
+                throw e;
+            }
+        }
+    }
+
+    private static Map<String, Object> resetTurnOutputs(String query) {
+        // Graph checkpoints span a conversation, so derived values must not leak into the next turn.
+        Map<String, Object> updates = new LinkedHashMap<>();
+        updates.put(AgentGraphKeys.RETRIEVAL, new SearchResponse(query, 0, List.of()));
+        updates.put(AgentGraphKeys.CONTEXT, "");
+        updates.put(AgentGraphKeys.CONTEXT_HIT_COUNT, 0);
+        updates.put(AgentGraphKeys.GROUNDED, false);
+        updates.put(AgentGraphKeys.BUILT_PROMPT, new BuiltPrompt("", ""));
+        updates.put(AgentGraphKeys.TOOL_RESULT, "");
+        updates.put(AgentGraphKeys.ANSWER, "");
+        updates.put(AgentGraphKeys.HUMAN_FEEDBACK, Map.of());
+        updates.put(AgentGraphKeys.NEXT_NODE, "");
+        updates.put(AgentGraphKeys.HUMAN_APPROVAL_REQUIRED, false);
+        updates.put(AgentGraphKeys.APPROVAL_REASON, "");
+        return updates;
+    }
+
+    private static String capabilityDenial(OverAllState state, PlanResult plan, String query) {
+        if (!AgentGraphSupport.hasCapabilityContext(state)) {
+            return null;
+        }
+        if ("ORDER_QUERY".equals(plan.strategy())
+                || "ORDER_POLICY_QUERY".equals(plan.strategy())
+                || "DANGEROUS_ORDER_OP".equals(plan.strategy())) {
+            boolean canRead = AgentGraphSupport.hasCapability(state, DemoCapability.OWN_ORDER_READ.name())
+                    || AgentGraphSupport.hasCapability(state, DemoCapability.ASSIGNED_ORDER_READ.name());
+            if (!canRead) {
+                return "当前演示身份没有订单查询能力。请切换到销售或客户身份后重试。";
+            }
+        }
+        if (HumanApprovalDetector.isDangerousOrderOp(plan.strategy())) {
+            String operation = HumanApprovalDetector.resolveOperationLabel(query);
+            boolean cancel = operation.contains("取消");
+            boolean allowed = AgentGraphSupport.hasCapability(state,
+                    (cancel ? DemoCapability.ORDER_CANCEL : DemoCapability.AFTER_SALES_CREATE).name());
+            if (!allowed) {
+                return "当前演示身份只能查看已授权订单，不能执行取消或售后操作。";
+            }
+        }
+        if (plan.needRag() && !AgentGraphSupport.hasCapability(state, DemoCapability.KNOWLEDGE_SEARCH.name())) {
+            return "当前演示身份没有知识检索能力。";
+        }
+        return null;
     }
 }

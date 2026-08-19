@@ -103,7 +103,7 @@ public class ShortTermMemoryManager {
 
     public void clear(String userId, String sessionId) {
         store.clear(session(userId, sessionId));
-        log.info("Short-term memory cleared for session={}:{}", userId, sessionId);
+        log.info("Short-term memory cleared for current session");
     }
 
     public void clear(String sessionId) {

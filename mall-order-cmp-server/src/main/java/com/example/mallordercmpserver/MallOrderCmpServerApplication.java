@@ -6,6 +6,8 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
 import com.example.mallordercmpserver.service.OpenOrderService;
 
 @SpringBootApplication
@@ -24,8 +26,10 @@ public class MallOrderCmpServerApplication {
     }
 
     @Bean
-    public WebClient.Builder webClientBuilder() {
-        return WebClient.builder();
+    public WebClient.Builder webClientBuilder(
+            @Value("${mall-order.service-token}") String serviceToken) {
+        return WebClient.builder().defaultHeader(
+                HttpHeaders.AUTHORIZATION, "Bearer " + serviceToken);
     }
 
 }

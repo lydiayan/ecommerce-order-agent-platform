@@ -1,0 +1,8 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Core Applications" type="CompoundRunConfigurationType">
+    <toRun name="01 Order Service" type="SpringBootApplicationConfigurationType" />
+    <toRun name="02 MCP Server" type="SpringBootApplicationConfigurationType" />
+    <toRun name="04 Agent" type="SpringBootApplicationConfigurationType" />
+    <method v="2" />
+  </configuration>
+</component>

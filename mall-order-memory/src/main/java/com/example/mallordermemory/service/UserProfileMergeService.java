@@ -73,7 +73,7 @@ public class UserProfileMergeService {
             String raw = MemoryExtractor.unwrapJson(response.getResult().getOutput().getText());
             Map<String, Object> merged = ModelOptionsUtils.jsonToMap(raw);
             if (merged.isEmpty()) {
-                log.info("User profile merge returned empty for userId={}", userId);
+                log.info("User profile merge returned empty");
                 return false;
             }
 
@@ -84,11 +84,11 @@ public class UserProfileMergeService {
             profile.setSource("conversation");
 
             UserProfile saved = userProfileRepository.upsert(profile);
-            log.info("Merged user profile for userId={}, version={}, confidence={}",
-                    userId, saved.getVersion(), saved.getConfidence());
+            log.info("Merged user profile, version={}, confidence={}",
+                    saved.getVersion(), saved.getConfidence());
             return true;
         } catch (Exception e) {
-            log.warn("User profile merge failed for userId={}: {}", userId, e.getMessage());
+            log.warn("User profile merge failed: {}", e.getMessage());
             return false;
         }
     }

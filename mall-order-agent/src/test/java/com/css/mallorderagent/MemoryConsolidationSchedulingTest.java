@@ -21,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         "memory.user-profile.enabled=false",
         "spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration"
 })
-class MemoryConsolidationSchedulingTest {
+class MemoryConsolidationSchedulingLiveIT {
 
     @Autowired
     private ApplicationContext applicationContext;

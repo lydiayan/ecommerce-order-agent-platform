@@ -124,7 +124,7 @@ public class ObservabilityProperties {
     }
 
     public static class ElasticsearchProperties {
-        private String uris = "http://127.0.0.1:9200";
+        private String uris = "http://127.0.0.1:19200";
         private String username;
         private String password;
         private String index = "rag-traces";

@@ -10,6 +10,7 @@ import com.example.mallordermilvusrag.tracing.RagTraceOperations;
 import com.example.mallordermilvusrag.tracing.RagTracingAdvisor;
 import com.example.mallorderobservability.trace.RagTraceScope;
 import com.example.mallorderobservability.trace.RagTraceService;
+import com.example.mallorderobservability.trace.TracePrivacy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
@@ -53,7 +54,10 @@ public class RagAskService {
             return askInternal(request, RagTraceScope.noop());
         }
 
-        Map<String, Object> attrs = Map.of("query", request.getQuery());
+        String query = request.getQuery();
+        Map<String, Object> attrs = Map.of(
+                "queryLength", query != null ? query.length() : 0,
+                "queryFingerprint", TracePrivacy.fingerprint(query));
         try (RagTraceScope trace = ragTraceService.begin("rag.ask", attrs)) {
             AskResponse response = askInternal(request, trace);
             response.setTraceId(trace.traceId());
@@ -79,7 +83,7 @@ public class RagAskService {
         }
 
         if (retrieval.getHits() == null || retrieval.getHits().isEmpty()) {
-            log.info("Ask: no retrieval hits for query='{}'", query);
+            log.info("Ask: no retrieval hits, queryLength={}", query.length());
             return new AskResponse(query, NO_CONTEXT_ANSWER, false, retrieval);
         }
         int contextLimit = Math.min(
@@ -106,7 +110,7 @@ public class RagAskService {
 
         String answer;
         RagTracingAdvisor ragTracingAdvisor = ragTracingAdvisorProvider.getIfAvailable();
-        RagTracingAdvisor.tag("userQuery", query);
+        RagTracingAdvisor.tag("queryLength", query.length());
         RagTracingAdvisor.tag("contextChunks", contextHits.size());
         RagTracingAdvisor.bindParentScope(trace);
         try {

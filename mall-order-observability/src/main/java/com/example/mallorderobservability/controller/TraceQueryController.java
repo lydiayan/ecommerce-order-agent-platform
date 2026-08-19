@@ -24,7 +24,7 @@ public class TraceQueryController {
     }
 
     @GetMapping("/{traceId}")
-    public ResponseEntity<Map<String, Object>> getTrace(@PathVariable String traceId) throws Exception {
+    public ResponseEntity<Map<String, Object>> getTrace(@PathVariable("traceId") String traceId) throws Exception {
         List<Map<String, Object>> events = traceQueryService.getTrace(traceId);
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("traceId", traceId);

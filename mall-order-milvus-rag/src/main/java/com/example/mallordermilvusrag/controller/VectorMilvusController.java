@@ -5,6 +5,7 @@ import com.example.mallordermilvusrag.service.DocumentImportService;
 import com.example.mallordermilvusrag.service.DocumentService;
 import com.example.mallordermilvusrag.service.RagAskService;
 import com.example.mallordermilvusrag.service.RagService;
+import com.example.mallordermilvusrag.splitter.api.RagSplitStrategy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
@@ -49,7 +50,8 @@ public class VectorMilvusController {
     @PostMapping("/documents")
     public ApiResponse<List<String>> addDocument(@RequestBody AddDocumentRequest request) {
         log.info("POST /vector/milvus/documents - adding document");
-        List<String> ids = ragService.addDocument(request.getText(), request.getMetadata());
+        List<String> ids = ragService.addDocument(request.getText(), request.getMetadata(),
+                request.getDocumentId(), request.getStrategy(), request.getContentType());
         return ApiResponse.success("Document added successfully, split into " + ids.size() + " chunks", ids);
     }
 
@@ -58,7 +60,8 @@ public class VectorMilvusController {
         log.info("POST /vector/milvus/documents/batch - adding {} documents", request.getDocuments().size());
 
         List<DocumentService.DocumentInput> inputs = request.getDocuments().stream()
-                .map(doc -> new DocumentService.DocumentInput(doc.getText(), doc.getMetadata()))
+                .map(doc -> new DocumentService.DocumentInput(doc.getText(), doc.getMetadata(),
+                        doc.getDocumentId(), doc.getStrategy(), doc.getContentType()))
                 .collect(Collectors.toList());
 
         List<String> ids = ragService.addDocuments(inputs);
@@ -74,10 +77,13 @@ public class VectorMilvusController {
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "department", required = false) String department,
             @RequestParam(value = "role", required = false) String role,
-            @RequestParam(value = "version", required = false) String version) throws IOException {
+            @RequestParam(value = "version", required = false) String version,
+            @RequestParam(value = "documentId", required = false) String documentId,
+            @RequestParam(value = "strategy", required = false) RagSplitStrategy strategy) throws IOException {
 
         log.info("POST /vector/milvus/documents/pdf - uploading file: {}", file.getOriginalFilename());
-        DocumentImportResult result = documentImportService.importPdf(file, department, role, version);
+        DocumentImportResult result = documentImportService.importPdf(
+                file, department, role, version, documentId, strategy);
         return ApiResponse.success(
                 "PDF processed: " + result.getFilename() + ", " + result.getChunkCount() + " chunks",
                 result);
@@ -97,7 +103,7 @@ public class VectorMilvusController {
     }
 
     /**
-     * 一键导入 classpath:data 目录下全部 PDF（内置 7 份知识库文档）。
+     * 一键导入 classpath:data 目录下全部 PDF（内置 8 份知识库文档）。
      */
     @PostMapping("/documents/import-local")
     public ApiResponse<List<DocumentImportResult>> importLocalPdfs() throws IOException {
@@ -111,8 +117,9 @@ public class VectorMilvusController {
 
     @PostMapping("/search")
     public ApiResponse<SearchResponse> search(@RequestBody SearchRequest request) {
-        log.info("POST /vector/milvus/search - query='{}', topK={}, roleFilter='{}', enableRerank='{}'",
-                request.getQuery(), request.getTopK(), request.getRoleFilter(), request.getEnableRerank());
+        log.info("POST /vector/milvus/search - queryLength={}, topK={}, filtered={}, enableRerank={}",
+                request.getQuery() != null ? request.getQuery().length() : 0,
+                request.getTopK(), request.getRoleFilter() != null, request.getEnableRerank());
 
         SearchResponse response = ragService.search(request);
 
@@ -126,8 +133,9 @@ public class VectorMilvusController {
      */
     @PostMapping("/ask")
     public ApiResponse<AskResponse> ask(@RequestBody SearchRequest request) {
-        log.info("POST /vector/milvus/ask - query='{}', roleFilter='{}'",
-                request.getQuery(), request.getRoleFilter());
+        log.info("POST /vector/milvus/ask - queryLength={}, filtered={}",
+                request.getQuery() != null ? request.getQuery().length() : 0,
+                request.getRoleFilter() != null);
         AskResponse response = ragAskService.ask(request);
         return ApiResponse.success(response);
     }
@@ -136,7 +144,7 @@ public class VectorMilvusController {
     public ApiResponse<SearchResponse> searchGet(
             @RequestParam("q") String q,
             @RequestParam(value = "topK", defaultValue = "5") int topK) {
-        log.info("GET /vector/milvus/search - query='{}', topK={}", q, topK);
+        log.info("GET /vector/milvus/search - queryLength={}, topK={}", q.length(), topK);
         SearchResponse response = ragService.search(q, topK);
         return ApiResponse.success(response);
     }

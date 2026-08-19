@@ -65,6 +65,15 @@ public class PromptBuilder {
                     【敏感操作】用户意图涉及退货/付款/取消/删除/换货/改地址等操作。请先向用户明确确认，\
                     使用「确认xxx吗？」句式询问，不要假设用户已同意，也不要描述为已执行操作。
                     """);
+        } else if ("ORDER_POLICY_QUERY".equals(plan.strategy())) {
+            userMessage.append("""
+                    工具查询结果是订单规则服务计算出的退款资格权威结论。回复必须：
+                    1) 严格保持工具中的资格结论，不得使用参考资料、常识或模型推理修改或弱化结论；
+                    2) ELIGIBLE 表示可以提交申请，不承诺最终退款成功；MANUAL_REVIEW 表示需要人工处理；
+                    3) 仅在 NEED_MORE_INFO 时询问 missingFields，并且只询问其中列出的字段；
+                    4) 不得声称工具已提供的字段缺失，不得声称系统无法实时获取订单状态；
+                    5) 结合 reasonCodes 和 nextAction 用简洁中文解释，不要在本次资格查询中直接创建退款工单。
+                    """);
         } else if ("ORDER_QUERY".equals(plan.strategy())) {
             userMessage.append("""
                     请根据工具查询结果回答用户。仅展示订单信息；不要主动发起退货/退款/换货/改地址/付款等操作，\

@@ -1,5 +1,6 @@
 server:
-  port: 8087
+  address: ${SERVER_ADDRESS:127.0.0.1}
+  port: ${SERVER_PORT:8087}
 
 spring:
   application:
@@ -9,15 +10,33 @@ spring:
     import: classpath:rag.yml
 
   datasource:
-    url: jdbc:mysql://localhost:3306/agent_memory?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
-    username: root
-    password: root
+    url: ${AGENT_MEMORY_DATASOURCE_URL:jdbc:mysql://127.0.0.1:13306/agent_memory?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
+    username: ${MYSQL_USER:portfolio}
+    password: ${MYSQL_PASSWORD:portfolio}
     driver-class-name: com.mysql.cj.jdbc.Driver
+
+  flyway:
+    enabled: ${AGENT_FLYWAY_ENABLED:true}
+    baseline-on-migrate: true
+    baseline-version: 0
+    locations: classpath:db/migration
+
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:16379}
+
+  session:
+    store-type: redis
+    timeout: ${AGENT_SESSION_IDLE_TIMEOUT:30m}
+    redis:
+      namespace: mall-order-agent:session
+      repository-type: indexed
 
   ai:
     openai:
-      api-key: ${DASHSCOPE_API_KEY}
-      base-url: https://dashscope.aliyuncs.com/compatible-mode
+      api-key: ${DASHSCOPE_API_KEY:missing}
+      base-url: ${DASHSCOPE_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
       embedding:
         options:
           model: text-embedding-v2
@@ -25,6 +44,19 @@ spring:
         options:
           model: qwen-plus
           temperature: 0.3
+    mcp:
+      client:
+        enabled: true
+        name: mall-order-agent-mcp
+        version: 1.0.0
+        request-timeout: 30s
+        type: ASYNC
+        toolcallback:
+          enabled: true
+        sse:
+          connections:
+            order-server:
+              url: ${MCP_SERVER_URL:http://127.0.0.1:8082}
 
 observability:
   enabled: true
@@ -38,18 +70,32 @@ observability:
     tag: trace
 
 rocketmq:
-  name-server: 127.0.0.1:9876
+  name-server: ${ROCKETMQ_NAMESRV_ADDR:127.0.0.1:19876}
   producer:
     group: rag-trace-producer-agent
     send-message-timeout: 3000
 
 agent:
+  auth:
+    enabled: ${AGENT_AUTH_ENABLED:true}
+    demo-initial-password: ${DEMO_INITIAL_PASSWORD:DemoLogin@2026!}
+    admin-initial-password: ${ADMIN_INITIAL_PASSWORD:}
+    evaluation-token: ${AGENT_EVALUATION_TOKEN:local-evaluation-token-change-me}
+    absolute-session-seconds: ${AGENT_SESSION_ABSOLUTE_SECONDS:28800}
+    login-max-failures: ${AGENT_LOGIN_MAX_FAILURES:5}
+    login-lock-seconds: ${AGENT_LOGIN_LOCK_SECONDS:900}
+    trusted-proxies: ${AGENT_TRUSTED_PROXIES:127.0.0.1,::1}
+    secure-cookie: ${AGENT_SECURE_COOKIE:false}
+    service-token: ${MALL_ORDER_SERVICE_TOKEN:local-order-service-token-change-me}
+    mcp-service-token: ${MCP_SERVICE_TOKEN:local-mcp-service-token-change-me}
   conversation:
     max-turns: 10
   graph:
     human-review-enabled: true # 敏感操作人工审核（退货/付款/删除/确认类回复）
   order:
-    base-url: http://127.0.0.1:8081
+    base-url: ${MALL_ORDER_BASE_URL:http://127.0.0.1:8081}
+    mcp:
+      enabled: true
 
 memory:
   enabled: true
@@ -61,14 +107,14 @@ memory:
     cursor-key-prefix: memory:consolidate:cursor
     ttl-seconds: 604800
     redis:
-      host: localhost
-      port: 6379
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:16379}
       connection-timeout-ms: 5000
   long-term:
     dimension: 1536
     milvus:
-      host: localhost
-      port: 19530
+      host: ${MILVUS_HOST:127.0.0.1}
+      port: ${MILVUS_PORT:29530}
   extractor:
     enabled: true
   consolidation:

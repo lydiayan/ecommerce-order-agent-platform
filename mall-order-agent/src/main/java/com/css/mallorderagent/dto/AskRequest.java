@@ -14,6 +14,9 @@ public class AskRequest {
     /** 用户 ID，对应 Redis key 中的 userId */
     private String userId;
 
+    /** 当前演示身份。优先于兼容字段 userId。 */
+    private String actorUserId;
+
     /** 检索返回条数 */
     private int topK = 5;
 
@@ -49,6 +52,14 @@ public class AskRequest {
 
     public void setUserId(String userId) {
         this.userId = userId;
+    }
+
+    public String getActorUserId() {
+        return actorUserId;
+    }
+
+    public void setActorUserId(String actorUserId) {
+        this.actorUserId = actorUserId;
     }
 
     public int getTopK() {

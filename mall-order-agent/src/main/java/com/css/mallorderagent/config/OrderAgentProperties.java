@@ -47,12 +47,37 @@ public class OrderAgentProperties {
         /** mall-order 服务 base URL（建议用 127.0.0.1，避免 localhost 解析到 IPv6） */
         private String baseUrl = "http://127.0.0.1:8081";
 
+        @NestedConfigurationProperty
+        private McpProperties mcp = new McpProperties();
+
         public String getBaseUrl() {
             return baseUrl;
         }
 
         public void setBaseUrl(String baseUrl) {
             this.baseUrl = baseUrl;
+        }
+
+        public McpProperties getMcp() {
+            return mcp;
+        }
+
+        public void setMcp(McpProperties mcp) {
+            this.mcp = mcp != null ? mcp : new McpProperties();
+        }
+    }
+
+    public static class McpProperties {
+
+        /** 敏感操作是否经 MCP 调用（默认 true） */
+        private boolean enabled = true;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
         }
     }
 

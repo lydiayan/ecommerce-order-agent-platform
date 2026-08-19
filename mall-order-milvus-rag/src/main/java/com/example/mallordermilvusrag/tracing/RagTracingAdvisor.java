@@ -11,7 +11,6 @@ import org.springframework.ai.chat.client.advisor.api.AdvisorChain;
 import org.springframework.ai.chat.client.advisor.api.BaseAdvisor;
 import org.springframework.ai.chat.client.advisor.api.CallAdvisorChain;
 import org.springframework.ai.chat.client.advisor.api.StreamAdvisorChain;
-import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import reactor.core.publisher.Flux;
 
@@ -114,10 +113,13 @@ public class RagTracingAdvisor implements BaseAdvisor {
 
         String model = null;
         Double temperature = null;
-        String combinedPrompt = null;
+        Integer inputLength = null;
         if (request.prompt() != null) {
             Map<String, Object> promptAttrs = PromptTraceAttributes.fromPrompt(request.prompt());
-            combinedPrompt = (String) promptAttrs.get("prompt");
+            Object promptLength = promptAttrs.get("promptLength");
+            if (promptLength instanceof Number number) {
+                inputLength = number.intValue();
+            }
             if (request.prompt().getOptions() != null) {
                 ChatOptions options = request.prompt().getOptions();
                 model = options.getModel();
@@ -125,11 +127,11 @@ public class RagTracingAdvisor implements BaseAdvisor {
             }
         }
 
-        String userQuery = null;
-        if (tags.containsKey("userQuery")) {
-            Object value = tags.get("userQuery");
-            if (value instanceof String text) {
-                userQuery = PromptTraceAttributes.truncate(text);
+        Integer queryLength = null;
+        if (tags.containsKey("queryLength")) {
+            Object value = tags.get("queryLength");
+            if (value instanceof Number number) {
+                queryLength = number.intValue();
             }
         }
         Integer contextChunks = null;
@@ -141,7 +143,7 @@ public class RagTracingAdvisor implements BaseAdvisor {
         }
 
         Map<String, Object> attrs = LlmSpanAttributes.buildStartAttributes(
-                userQuery, contextChunks, model, temperature, combinedPrompt);
+                queryLength, contextChunks, model, temperature, inputLength);
 
         RagTraceScope span = parentScope != null
                 ? parentScope.child(RagTraceOperations.LLM, attrs)
@@ -179,15 +181,6 @@ public class RagTracingAdvisor implements BaseAdvisor {
             return;
         }
         span.attributes(LlmSpanAttributes.fromChatResponse(response.chatResponse()));
-
-        Generation result = response.chatResponse().getResult();
-        if (result != null && result.getOutput() != null) {
-            String text = result.getOutput().getText();
-            span.attribute("outputLength", text != null ? text.length() : 0);
-            if (text != null && !text.isBlank()) {
-                span.attribute("output", PromptTraceAttributes.truncate(text));
-            }
-        }
     }
 
     // ── Override adviseCall for error handling ───────────────────────────

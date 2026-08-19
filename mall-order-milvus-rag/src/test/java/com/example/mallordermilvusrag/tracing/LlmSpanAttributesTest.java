@@ -33,6 +33,8 @@ class LlmSpanAttributesTest {
         assertEquals(120, attrs.get("inputToken"));
         assertEquals(36, attrs.get("outputToken"));
         assertEquals("stop", attrs.get("finishReason"));
+        assertEquals(9, attrs.get("outputLength"));
+        assertFalse(attrs.containsKey("output"));
     }
 
     @Test
@@ -43,14 +45,14 @@ class LlmSpanAttributesTest {
     @Test
     void shouldBuildStartAttributes() {
         Map<String, Object> attrs = LlmSpanAttributes.buildStartAttributes(
-                "婚假?", 2, "qwen-plus", 0.3, "[SYSTEM] 你是助手\n[USER] 用户消息");
+                3, 2, "qwen-plus", 0.3, 25);
 
         assertEquals("qwen-plus", attrs.get("model"));
         assertEquals(0.3, attrs.get("temperature"));
         assertEquals(2, attrs.get("contextChunks"));
-        assertTrue(attrs.get("input").toString().contains("[SYSTEM]"));
-        assertTrue(attrs.get("userQuery").toString().contains("婚假"));
-        assertFalse(attrs.containsKey("systemPrompt"));
-        assertFalse(attrs.containsKey("context"));
+        assertEquals(3, attrs.get("queryLength"));
+        assertEquals(25, attrs.get("inputLength"));
+        assertFalse(attrs.containsKey("input"));
+        assertFalse(attrs.containsKey("userQuery"));
     }
 }

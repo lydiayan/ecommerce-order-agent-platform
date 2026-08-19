@@ -21,9 +21,6 @@ public final class PromptBuildSpanAttributes {
         if (promptVersion != null && !promptVersion.isBlank()) {
             attrs.put("promptVersion", promptVersion);
         }
-        if (systemPrompt != null && !systemPrompt.isBlank()) {
-            attrs.put("systemPrompt", PromptTraceAttributes.truncate(systemPrompt));
-        }
         int promptLength = (systemPrompt != null ? systemPrompt.length() : 0)
                 + (userMessage != null ? userMessage.length() : 0);
         attrs.put("promptLength", promptLength);

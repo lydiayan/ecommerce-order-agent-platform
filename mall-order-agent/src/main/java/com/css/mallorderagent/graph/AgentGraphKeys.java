@@ -9,6 +9,11 @@ public final class AgentGraphKeys {
     public static final String USER_ID = "userId";
     public static final String SESSION_ID = "sessionId";
     public static final String QUERY = "query";
+    public static final String PERSONA_CONTEXT = "personaContext";
+    public static final String CAPABILITIES = "capabilities";
+    public static final String AUTHORIZED_CUSTOMER_IDS = "authorizedCustomerIds";
+    public static final String RAG_ROLE_SCOPES = "ragRoleScopes";
+    public static final String RAG_DEPARTMENT_SCOPES = "ragDepartmentScopes";
 
     public static final String HISTORY = "history";
     public static final String HISTORY_COUNT = "historyCount";

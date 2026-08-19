@@ -6,7 +6,7 @@
 
     <parent>
         <groupId>com.example</groupId>
-        <artifactId>EcommSpringBot</artifactId>
+        <artifactId>ecommerce-order-agent-platform</artifactId>
         <version>${revision}</version>
     </parent>
 
@@ -68,6 +68,20 @@
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-rag</artifactId>
+        </dependency>
+
+        <!-- Local token estimation for deterministic chunk limits. -->
+        <dependency>
+            <groupId>com.knuddels</groupId>
+            <artifactId>jtokkit</artifactId>
+            <version>1.1.0</version>
+        </dependency>
+
+        <!-- Structure-aware HTML parsing. -->
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>1.21.2</version>
         </dependency>
 
         <!-- Lombok -->

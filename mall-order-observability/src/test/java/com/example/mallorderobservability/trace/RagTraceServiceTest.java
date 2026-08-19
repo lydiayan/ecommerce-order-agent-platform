@@ -2,6 +2,7 @@ package com.example.mallorderobservability.trace;
 
 import com.example.mallorderobservability.config.ObservabilityProperties;
 import com.example.mallorderobservability.model.TraceEventType;
+import com.example.mallorderobservability.model.TraceEvent;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -9,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 class RagTraceServiceTest {
@@ -42,6 +44,29 @@ class RagTraceServiceTest {
     }
 
     @Test
+    void traceEndCarriesInitialAndCompletionAttributes() {
+        List<TraceEvent> events = new ArrayList<>();
+        ObservabilityProperties properties = new ObservabilityProperties();
+        properties.setEnabled(true);
+        properties.setServiceName("test-service");
+        RagTraceService service = new RagTraceService(events::add, properties);
+
+        try (RagTraceScope scope = service.begin("agent.ask", Map.of(
+                "traceSchemaVersion", "1.0",
+                "conversationId", "conversation-001"))) {
+            scope.attribute("planStrategy", "RAG_QA");
+        }
+
+        TraceEvent traceEnd = events.stream()
+                .filter(event -> event.getEventType() == TraceEventType.TRACE_END)
+                .findFirst()
+                .orElseThrow();
+        assertEquals("1.0", traceEnd.getAttributes().get("traceSchemaVersion"));
+        assertEquals("conversation-001", traceEnd.getAttributes().get("conversationId"));
+        assertEquals("RAG_QA", traceEnd.getAttributes().get("planStrategy"));
+    }
+
+    @Test
     void llmGenerateEmitsSingleSpanEndWithMergedAttributes() {
         List<String> operations = new ArrayList<>();
         TracePublisher publisher = event -> operations.add(event.getEventType() + ":" + event.getOperation());
@@ -65,5 +90,27 @@ class RagTraceServiceTest {
         assertEquals("SPAN_END:llm", operations.get(2));
         assertEquals("SPAN_END:rag.ask", operations.get(3));
         assertEquals("TRACE_END:rag.ask", operations.get(4));
+    }
+
+    @Test
+    void stripsRawPayloadsAtCollectionBoundary() {
+        List<TraceEvent> events = new ArrayList<>();
+        ObservabilityProperties properties = new ObservabilityProperties();
+        properties.setEnabled(true);
+        properties.setServiceName("test-service");
+        RagTraceService service = new RagTraceService(events::add, properties);
+
+        try (RagTraceScope ignored = service.begin("agent.ask", Map.of(
+                "query", "raw question",
+                "userId", "USER1001",
+                "queryFingerprint", "abc123"))) {
+            // closing the scope emits the complete trace
+        }
+
+        events.forEach(event -> {
+            assertFalse(event.getAttributes().containsKey("query"));
+            assertFalse(event.getAttributes().containsKey("userId"));
+            assertEquals("abc123", event.getAttributes().get("queryFingerprint"));
+        });
     }
 }

@@ -19,13 +19,15 @@ public class RagDocumentProperties {
     /** classpath 下 PDF 目录，如 data */
     private String dataDir = "data";
 
+    /** Milvus collection used by the custom scalar-filter schema. */
+    private String collectionName = "mall_rag_v3";
+
+    /** Embedding vector dimension used by the custom Milvus schema. */
+    private int dimensions = 1536;
+
     /** 文档 metadata 列表 */
     @NestedConfigurationProperty
     private List<CatalogEntry> catalog = new ArrayList<>();
-
-    /** 文本分块参数 */
-    @NestedConfigurationProperty
-    private ChunkProperties chunk = new ChunkProperties();
 
     /** Qwen rerank 重排序配置 */
     @NestedConfigurationProperty
@@ -43,20 +45,28 @@ public class RagDocumentProperties {
         this.dataDir = dataDir;
     }
 
+    public String getCollectionName() {
+        return collectionName;
+    }
+
+    public void setCollectionName(String collectionName) {
+        this.collectionName = collectionName;
+    }
+
+    public int getDimensions() {
+        return dimensions;
+    }
+
+    public void setDimensions(int dimensions) {
+        this.dimensions = dimensions;
+    }
+
     public List<CatalogEntry> getCatalog() {
         return catalog;
     }
 
     public void setCatalog(List<CatalogEntry> catalog) {
         this.catalog = catalog != null ? catalog : new ArrayList<>();
-    }
-
-    public ChunkProperties getChunk() {
-        return chunk;
-    }
-
-    public void setChunk(ChunkProperties chunk) {
-        this.chunk = chunk != null ? chunk : new ChunkProperties();
     }
 
     public RerankProperties getRerank() {
@@ -123,62 +133,6 @@ public class RagDocumentProperties {
 
         public void setVersion(String version) {
             this.version = version;
-        }
-    }
-
-    public static class ChunkProperties {
-
-        /** 每块目标 token 数 */
-        private int chunkSize = 250;
-
-        /** 仅在断句点切分前，chunk 至少达到的字符数（中文 PDF 建议 80~120，默认 350 过大） */
-        private int minChunkSizeChars = 80;
-
-        /** 短于该字符数的块丢弃 */
-        private int minChunkLengthToEmbed = 5;
-
-        private int maxNumChunks = 10000;
-
-        private boolean keepSeparator = true;
-
-        public int getChunkSize() {
-            return chunkSize;
-        }
-
-        public void setChunkSize(int chunkSize) {
-            this.chunkSize = chunkSize;
-        }
-
-        public int getMinChunkSizeChars() {
-            return minChunkSizeChars;
-        }
-
-        public void setMinChunkSizeChars(int minChunkSizeChars) {
-            this.minChunkSizeChars = minChunkSizeChars;
-        }
-
-        public int getMinChunkLengthToEmbed() {
-            return minChunkLengthToEmbed;
-        }
-
-        public void setMinChunkLengthToEmbed(int minChunkLengthToEmbed) {
-            this.minChunkLengthToEmbed = minChunkLengthToEmbed;
-        }
-
-        public int getMaxNumChunks() {
-            return maxNumChunks;
-        }
-
-        public void setMaxNumChunks(int maxNumChunks) {
-            this.maxNumChunks = maxNumChunks;
-        }
-
-        public boolean isKeepSeparator() {
-            return keepSeparator;
-        }
-
-        public void setKeepSeparator(boolean keepSeparator) {
-            this.keepSeparator = keepSeparator;
         }
     }
 
@@ -270,7 +224,7 @@ public class RagDocumentProperties {
                 """;
 
         /** Prompt 模板版本，写入 trace 便于对比实验 */
-        private String promptVersion = "v1";
+        private String promptVersion = "v2";
 
         public String getModel() {
             return model;

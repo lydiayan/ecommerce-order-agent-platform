@@ -1,0 +1,14 @@
+spring:
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    baseline-version: 0
+    locations: classpath:db/migration
+
+agent:
+  demo:
+    enabled: true
+  auth:
+    enabled: true
+    secure-cookie: false
+    demo-impersonation-enabled: true

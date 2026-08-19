@@ -1,2 +1,3 @@
+com.example.mallordermilvusrag.config.RagPropertiesAutoConfiguration
 com.example.mallordermilvusrag.tracing.RagTracingConfiguration
 com.example.mallordermilvusrag.config.RagAskChatClientConfiguration

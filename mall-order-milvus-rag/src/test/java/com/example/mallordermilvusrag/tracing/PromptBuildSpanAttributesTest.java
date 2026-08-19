@@ -18,6 +18,6 @@ class PromptBuildSpanAttributesTest {
         assertEquals(0, attrs.get("historyCount"));
         assertEquals(0, attrs.get("memoryCount"));
         assertEquals("你是助手".length() + "用户消息".length(), attrs.get("promptLength"));
-        assertEquals("你是助手", attrs.get("systemPrompt"));
+        assertFalse(attrs.containsKey("systemPrompt"));
     }
 }

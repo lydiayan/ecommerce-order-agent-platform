@@ -8,13 +8,16 @@ import com.css.mallorderagent.planner.HumanApprovalDetector;
 import com.css.mallorderagent.planner.PlanResult;
 import com.css.mallorderagent.prompt.BuiltPrompt;
 import com.example.mallordermilvusrag.config.RagDocumentProperties;
+import com.example.mallordermilvusrag.tracing.LlmSpanAttributes;
 import com.example.mallordermilvusrag.tracing.RagTracingAdvisor;
 import com.example.mallorderobservability.trace.RagTraceScope;
+import com.example.mallorderobservability.trace.RagTraceService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.openai.OpenAiChatOptions;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
@@ -35,14 +38,11 @@ public class LlmNode implements NodeAction {
 
     private final ChatClient chatClient;
     private final RagDocumentProperties.AskProperties askProperties;
-    private final ObjectProvider<RagTracingAdvisor> ragTracingAdvisorProvider;
 
     public LlmNode(ChatClient chatClient,
-                   RagDocumentProperties ragDocumentProperties,
-                   ObjectProvider<RagTracingAdvisor> ragTracingAdvisorProvider) {
+                   RagDocumentProperties ragDocumentProperties) {
         this.chatClient = chatClient;
         this.askProperties = ragDocumentProperties.getAsk();
-        this.ragTracingAdvisorProvider = ragTracingAdvisorProvider;
     }
 
     @Override
@@ -58,8 +58,8 @@ public class LlmNode implements NodeAction {
             String toolResult = state.value(AgentGraphKeys.TOOL_RESULT, "");
             String context = state.value(AgentGraphKeys.CONTEXT, "");
             answer = HumanApprovalDetector.buildDangerousOrderConfirmation(query, toolResult, context);
-            log.info("LlmNode skipped LLM for DANGEROUS_ORDER_OP, query='{}', orderIdPresent={}",
-                    query, HumanApprovalDetector.extractFirstOrderId(toolResult).isPresent());
+            log.info("LlmNode skipped LLM for DANGEROUS_ORDER_OP, queryLength={}, orderIdPresent={}",
+                    query.length(), HumanApprovalDetector.extractFirstOrderId(toolResult).isPresent());
         } else {
             BuiltPrompt built = state.value(AgentGraphKeys.BUILT_PROMPT, BuiltPrompt.class)
                     .orElseThrow(() -> new IllegalStateException("builtPrompt is required before LlmNode"));
@@ -84,25 +84,41 @@ public class LlmNode implements NodeAction {
     }
 
     private String callLlm(RagTraceScope trace, String query, BuiltPrompt built, int contextChunks) {
-        RagTracingAdvisor ragTracingAdvisor = ragTracingAdvisorProvider.getIfAvailable();
-        RagTracingAdvisor.tag("userQuery", query);
-        RagTracingAdvisor.tag("contextChunks", contextChunks);
-        RagTracingAdvisor.bindParentScope(trace);
-        try {
-            ChatClient.ChatClientRequestSpec requestSpec = chatClient.prompt()
-                    .options(OpenAiChatOptions.builder()
-                            .model(askProperties.getModel())
-                            .temperature(askProperties.getTemperature())
-                            .build())
-                    .system(built.systemPrompt())
-                    .user(built.userMessage());
-            if (ragTracingAdvisor != null) {
-                requestSpec.advisors(ragTracingAdvisor);
+        Map<String, Object> startAttributes = LlmSpanAttributes.buildStartAttributes(
+                query.length(),
+                contextChunks,
+                askProperties.getModel(),
+                askProperties.getTemperature(),
+                built.systemPrompt().length() + built.userMessage().length());
+
+        try (RagTraceScope llmSpan = trace.child(RagTraceService.LLM_OPERATION, startAttributes)) {
+            try {
+                ChatClient.ChatClientRequestSpec requestSpec = chatClient.prompt()
+                        .options(OpenAiChatOptions.builder()
+                                .model(askProperties.getModel())
+                                .temperature(askProperties.getTemperature())
+                                .build())
+                        .system(built.systemPrompt())
+                        .user(built.userMessage());
+                ChatResponse response = requestSpec.call().chatResponse();
+                llmSpan.attributes(LlmSpanAttributes.fromChatResponse(response));
+                return extractAnswer(response);
+            } catch (RuntimeException e) {
+                llmSpan.error(e);
+                throw e;
             }
-            return requestSpec.call().content();
-        } finally {
-            RagTracingAdvisor.clearParentScope();
-            RagTracingAdvisor.clearTags();
         }
+    }
+
+    private static String extractAnswer(ChatResponse response) {
+        Generation generation = response != null ? response.getResult() : null;
+        if (generation == null || generation.getOutput() == null) {
+            throw new IllegalStateException("LLM returned no generation");
+        }
+        String answer = generation.getOutput().getText();
+        if (answer == null || answer.isBlank()) {
+            throw new IllegalStateException("LLM returned an empty answer");
+        }
+        return answer;
     }
 }

@@ -11,6 +11,7 @@ public final class ActionDefinitions {
     public static final String MEMORY_LOAD = "MEMORY_LOAD";
     public static final String LLM_GENERATE = "LLM_GENERATE";
     public static final String ORDER_QUERY = "ORDER_QUERY";
+    public static final String REFUND_ELIGIBILITY = "REFUND_ELIGIBILITY";
 
     private ActionDefinitions() {
     }
@@ -31,6 +32,10 @@ public final class ActionDefinitions {
         return new ActionDefinition(ORDER_QUERY, ActionType.TOOL, "orderQueryTool");
     }
 
+    public static ActionDefinition refundEligibilityTool() {
+        return new ActionDefinition(REFUND_ELIGIBILITY, ActionType.TOOL, "refundEligibilityTool");
+    }
+
     /** 标准 RAG 问答链路：记忆 → 检索 → 生成 */
     public static List<ActionDefinition> ragQaPipeline() {
         return List.of(memoryLoad(), ragKnowledgeSearch(), llmGenerate());
@@ -39,6 +44,11 @@ public final class ActionDefinitions {
     /** 订单查询链路：记忆 → 工具 → 生成 */
     public static List<ActionDefinition> orderQueryPipeline() {
         return List.of(memoryLoad(), orderQueryTool(), llmGenerate());
+    }
+
+    /** 订单退款资格链路：记忆 → 权威规则工具 → 生成 */
+    public static List<ActionDefinition> orderPolicyQueryPipeline() {
+        return List.of(memoryLoad(), refundEligibilityTool(), llmGenerate());
     }
 
     /** 敏感订单操作：记忆 → 查单 → RAG 规则 → 生成确认话术 */

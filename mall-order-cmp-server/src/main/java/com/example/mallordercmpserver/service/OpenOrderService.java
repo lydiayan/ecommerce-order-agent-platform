@@ -1,13 +1,14 @@
 package com.example.mallordercmpserver.service;
+
 import com.example.mallordercmpserver.data.Order;
-import com.example.mallordercmpserver.data.Product;
-import org.springaicommunity.mcp.annotation.McpTool;
+import com.example.mallordercmpserver.data.RefundEligibilityResult;
 import org.springframework.ai.tool.annotation.Tool;
+import org.springframework.ai.tool.annotation.ToolParam;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
 import org.springframework.web.reactive.function.client.WebClient;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -17,100 +18,148 @@ import java.util.List;
 @Service
 public class OpenOrderService {
 
-    private static final String BASE_URL = "http://localhost:8081";
-
-    private final RestTemplate restTemplate;
-
     private final WebClient webClient;
-    public OpenOrderService(WebClient.Builder webClientBuilder) {
+
+    public OpenOrderService(WebClient.Builder webClientBuilder,
+                            @Value("${mall-order.base-url:http://127.0.0.1:8081}") String baseUrl) {
         this.webClient = webClientBuilder
-                .baseUrl("http://localhost:8081")
+                .baseUrl(baseUrl)
                 .build();
-        this.restTemplate = new RestTemplate();
     }
 
-    @McpTool(description = "获取所有订单信息" )
-    public List<Order> getOrders() {
-        // 尝试远程调用
-        System.out.println("获取所有订单信息");
-        String url = BASE_URL+"/orders/list";
-        return restTemplate.getForObject(url, List.class);
-    }
-
-    @Tool(description = "根据用户ID获取用户订单列表信息" )
+    @Tool(description = "根据用户ID获取该用户的订单列表")
     public List<Order> getOrdersByUserId(String userId) {
-        System.out.println("根据用户ID获取用户订单列表信息");
-        // 尝试远程调用
-        List<Order> response=new ArrayList<>();
-        try {
-            response = webClient.get()
-                    .uri(uriBuilder -> uriBuilder
-                            .path("/orders/user/"+userId)
-                            .build())
-                    .retrieve()
-                    .bodyToMono(List.class)
-                    .block();
-            System.out.println(userId+"的订单数量：" + response.size());
-            // 解析响应并返回格式化的天气信息
-            for (Order order : response){
-                System.out.println("订单ID：" + order.getOrderId());
-            }
-
-        } catch (Exception e) {
-            //return "获取信息失败：" + e.getMessage();
-        }
-        return  response;
-    }
-    @Tool(description = "根据订单ID获取订单详情" )
-    public Order getOrderById(String orderId) {
-        System.out.println("根据订单ID获取订单详情");
-        String url = BASE_URL+"/orders/order"+"/{orderId}";
-        return restTemplate.getForObject(url, Order.class, orderId);
+        List<Order> response = webClient.get()
+                .uri("/orders/user/{userId}", userId)
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<List<Order>>() {
+                })
+                .block();
+        return response != null ? response : List.of();
     }
 
-    @Tool(description = "根据订单ID取消订单" )
-    public boolean cancelOrder(String orderId) {
-        System.out.println("根据订单ID取消订单");
-        String url = BASE_URL+"/orders/cancel/{orderId}";
-        return restTemplate.postForObject(url, null, Boolean.class, orderId);
+    @Tool(description = "按订单ID查询当前用户拥有的订单详情")
+    public Order getOrderById(String orderId, String userId) {
+        return webClient.get()
+                .uri(uriBuilder -> uriBuilder.path("/orders/{orderId}")
+                        .queryParam("userId", userId)
+                        .build(orderId))
+                .retrieve()
+                .bodyToMono(Order.class)
+                .block();
     }
 
-
-    @Tool(description = "根据分类ID获取商品列表")
-    public List<Product> getProductsByCategory(int categoryId) {
-        System.out.println("根据分类ID获取商品列表");
-        String url = BASE_URL + "/products/category/" + categoryId;
-        return restTemplate.getForObject(url, List.class);
+    @Tool(description = "权威判断当前用户整单退款资格。返回四态结论、原因编码、缺失字段和下一步动作；不得用知识库推翻该结果")
+    public String evaluateRefundEligibility(
+            String orderId,
+            String userId,
+            @ToolParam(required = false, description = "NO_REASON/QUALITY_ISSUE/WRONG_ITEM/SHIPPING_DAMAGE/OTHER")
+            String reasonType,
+            @ToolParam(required = false, description = "用户声明是否拆封") Boolean customerOpened,
+            @ToolParam(required = false, description = "用户声明是否使用") Boolean customerUsed,
+            @ToolParam(required = false, description = "RESALABLE/NOT_RESALABLE") String conditionStatus,
+            @ToolParam(required = false, description = "质量问题或异常情况描述") String reasonDescription,
+            @ToolParam(required = false, description = "证据文件地址列表") List<String> evidenceUrls) {
+        RefundEligibilityResult result = webClient.post()
+                .uri("/orders/{orderId}/refund-eligibility", orderId)
+                .bodyValue(new RefundEligibilityRequest(
+                        userId,
+                        reasonType != null ? reasonType : "NO_REASON",
+                        customerOpened,
+                        customerUsed,
+                        conditionStatus,
+                        reasonDescription,
+                        evidenceUrls != null ? evidenceUrls : List.of()))
+                .retrieve()
+                .bodyToMono(RefundEligibilityResult.class)
+                .blockOptional()
+                .orElseThrow(() -> new IllegalStateException("mall-order returned an empty eligibility response"));
+        return formatEligibility(result);
     }
 
-    @Tool(description = "根据商品名称搜索商品")
-    public List<Product> getProductsByName(String productName) {
-        System.out.println("根据商品名称搜索商品");
-        String url = BASE_URL + "/products/search?productName=" + productName;
-        return restTemplate.getForObject(url, List.class);
+    @Tool(description = "取消当前用户拥有的订单")
+    public boolean cancelOrder(String orderId, String userId) {
+        Boolean result = webClient.post()
+                .uri(uriBuilder -> uriBuilder.path("/orders/{orderId}/cancel")
+                        .queryParam("userId", userId)
+                        .build(orderId))
+                .retrieve()
+                .bodyToMono(Boolean.class)
+                .block();
+        return Boolean.TRUE.equals(result);
     }
 
-    @Tool(description = "添加新商品")
-    public int addProduct(Product product) {
-        System.out.println("添加新商品");
-        String url = BASE_URL+"/products";
-        return restTemplate.postForObject(url, product, Integer.class);
+    @Tool(description = "为当前用户订单提交退货、退款或换货申请")
+    public String submitAfterSalesRequest(String orderId, String userId, String operationType) {
+        AfterSalesTicket ticket = createAfterSalesTicket(orderId, userId, operationType);
+        return """
+                已成功提交%s申请，当前状态为%s。
+                - 订单号：%s
+                - 工单号：%s
+                后续可在「我的订单」查看进度，客服将在 1 个工作日内处理。
+                """.formatted(ticket.operationType(), ticket.status(), ticket.orderId(), ticket.ticketId()).trim();
     }
 
-    @Tool(description = "更新商品信息")
-    public int updateProduct(Product product) {
-        System.out.println("更新商品信息");
-        String url = BASE_URL+"/products";
-        return restTemplate.exchange(url, org.springframework.http.HttpMethod.PUT,
-                new org.springframework.http.HttpEntity<>(product), Integer.class).getBody();
+    @Tool(description = "为当前用户订单提交修改收货地址申请")
+    public String submitAddressChangeRequest(String orderId, String userId) {
+        AfterSalesTicket ticket = createAfterSalesTicket(orderId, userId, "修改收货地址");
+        return """
+                已提交修改收货地址申请。
+                - 订单号：%s
+                - 工单号：%s
+                请留意客服或短信通知确认新地址。
+                """.formatted(ticket.orderId(), ticket.ticketId()).trim();
     }
 
-    @Tool(description = "根据商品ID删除商品")
-    public int deleteProduct(int productId) {
-        System.out.println("根据商品ID删除商品");
-        String url = BASE_URL + "/products/" + productId;
-        restTemplate.delete(url);
-        // DELETE请求通常不返回内容，这里返回1表示成功执行
-        return 1;
+    private AfterSalesTicket createAfterSalesTicket(String orderId, String userId, String operationType) {
+        return webClient.post()
+                .uri("/orders/{orderId}/after-sales", orderId)
+                .bodyValue(new AfterSalesCommand(userId, operationType))
+                .retrieve()
+                .bodyToMono(AfterSalesTicket.class)
+                .blockOptional()
+                .orElseThrow(() -> new IllegalStateException("mall-order returned an empty after-sales response"));
+    }
+
+    private record AfterSalesCommand(String userId, String operationType) {
+    }
+
+    private record RefundEligibilityRequest(
+            String userId,
+            String reasonType,
+            Boolean customerOpened,
+            Boolean customerUsed,
+            String conditionStatus,
+            String reasonDescription,
+            List<String> evidenceUrls) {
+    }
+
+    private record AfterSalesTicket(String ticketId, String orderId, String userId,
+                                    String operationType, String status) {
+    }
+
+    private static String formatEligibility(RefundEligibilityResult result) {
+        String amount = result.getRefundableAmount() != null ? result.getRefundableAmount().toPlainString() : "-";
+        String operation = result.getOperationType() != null ? result.getOperationType() : "-";
+        return """
+                【退款资格权威结论】
+                订单号：%s
+                资格结论：%s
+                退款业务：%s
+                原因编码：%s
+                缺失字段：%s
+                下一步：%s
+                可申请金额：%s
+                规则版本：%s
+                约束：该结论由订单规则服务根据实时数据库事实计算，知识库和大模型不得修改结论。
+                """.formatted(
+                result.getOrderId(),
+                result.getDecision(),
+                operation,
+                result.getReasonCodes() != null ? result.getReasonCodes() : List.of(),
+                result.getMissingFields() != null ? result.getMissingFields() : List.of(),
+                result.getNextAction(),
+                amount,
+                result.getPolicyVersion()).trim();
     }
 }

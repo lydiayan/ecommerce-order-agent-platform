@@ -5,6 +5,7 @@ import lombok.Data;
 
 import java.io.Serializable;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.Date;
 import java.util.List;
 
@@ -24,6 +25,14 @@ public class Order implements Serializable {
      * 4:已取消
      */
     private Integer orderStatus;
+    private Integer deliveryStatus;
+    private LocalDateTime shippedAt;
+    private LocalDateTime signedAt;
+    private Integer productionStatus;
+    private LocalDateTime productionStartedAt;
+    private Integer digitalDeliveryStatus;
+    private LocalDateTime digitalDeliveredAt;
+    private LocalDateTime redeemedAt;
     private String paymentMethod;
     private String shippingAddress;
     private String contactPhone;

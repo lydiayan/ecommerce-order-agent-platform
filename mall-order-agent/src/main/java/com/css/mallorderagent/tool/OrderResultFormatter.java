@@ -22,9 +22,19 @@ final class OrderResultFormatter {
         sb.append("用户ID：").append(nullToEmpty(order.getUserId())).append('\n');
         sb.append("下单时间：").append(formatDate(order)).append('\n');
         sb.append("订单状态：").append(formatStatus(order.getOrderStatus())).append('\n');
+        sb.append("物流状态：").append(formatDeliveryStatus(order.getDeliveryStatus())).append('\n');
+        if (order.getShippedAt() != null) {
+            sb.append("发货时间：").append(order.getShippedAt()).append('\n');
+        }
+        if (order.getSignedAt() != null) {
+            sb.append("签收时间：").append(order.getSignedAt()).append('\n');
+        }
         sb.append("订单金额：").append(order.getTotalAmount() != null ? order.getTotalAmount() : "-").append('\n');
         if (order.getShippingAddress() != null && !order.getShippingAddress().isBlank()) {
             sb.append("收货地址：").append(order.getShippingAddress()).append('\n');
+        }
+        if (order.getContactPhone() != null && !order.getContactPhone().isBlank()) {
+            sb.append("联系电话：").append(order.getContactPhone()).append('\n');
         }
         appendDetails(sb, order.getOrderDetails());
         return sb.toString().trim();
@@ -59,8 +69,35 @@ final class OrderResultFormatter {
             sb.append("- ").append(nullToEmpty(detail.getProductName()))
                     .append(" x").append(detail.getQuantity() != null ? detail.getQuantity() : 1)
                     .append("，单价 ").append(detail.getUnitPrice() != null ? detail.getUnitPrice() : "-")
+                    .append("，商品类型：").append(formatProductType(detail.getProductType()))
                     .append('\n');
         }
+    }
+
+    private static String formatProductType(Integer productType) {
+        if (productType == null) {
+            return "未知";
+        }
+        return switch (productType) {
+            case 0 -> "普通商品";
+            case 1 -> "定制商品";
+            case 2 -> "生鲜类";
+            case 3 -> "虚拟商品";
+            default -> "未知(" + productType + ")";
+        };
+    }
+
+    private static String formatDeliveryStatus(Integer status) {
+        if (status == null) {
+            return "未知";
+        }
+        return switch (status) {
+            case 0 -> "未发货";
+            case 1 -> "运输中";
+            case 2 -> "已签收";
+            case 3 -> "已拒收";
+            default -> "未知(" + status + ")";
+        };
     }
 
     private static String formatStatus(Integer status) {

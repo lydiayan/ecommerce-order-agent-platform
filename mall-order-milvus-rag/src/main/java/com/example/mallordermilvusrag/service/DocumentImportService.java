@@ -3,6 +3,7 @@ package com.example.mallordermilvusrag.service;
 import com.example.mallordermilvusrag.config.RagDocumentProperties;
 import com.example.mallordermilvusrag.dto.DocumentImportResult;
 import com.example.mallordermilvusrag.dto.DocumentMetadata;
+import com.example.mallordermilvusrag.splitter.api.RagSplitStrategy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
@@ -41,9 +42,18 @@ public class DocumentImportService {
                                           String departmentOverride,
                                           String roleOverride,
                                           String versionOverride) throws IOException {
+        return importPdf(file, departmentOverride, roleOverride, versionOverride, null, null);
+    }
+
+    public DocumentImportResult importPdf(MultipartFile file,
+                                          String departmentOverride,
+                                          String roleOverride,
+                                          String versionOverride,
+                                          String documentId,
+                                          RagSplitStrategy strategy) throws IOException {
         String filename = file.getOriginalFilename() != null ? file.getOriginalFilename() : "unknown.pdf";
         DocumentMetadata metadata = metadataRegistry.resolve(filename, departmentOverride, roleOverride, versionOverride);
-        return importPdfBytes(file.getBytes(), filename, metadata);
+        return importPdfBytes(file.getBytes(), filename, metadata, documentId, strategy);
     }
 
     public List<DocumentImportResult> importPdfs(List<MultipartFile> files) throws IOException {
@@ -55,7 +65,7 @@ public class DocumentImportService {
     }
 
     /**
-     * 从 classpath 配置的 data 目录批量导入 PDF（适合 7 份内置知识库文档一键入库）。
+     * 从 classpath 配置的 data 目录批量导入 PDF（适合 8 份内置知识库文档一键入库）。
      */
     public List<DocumentImportResult> importFromClasspathDataDir() throws IOException {
         String pattern = "classpath:" + normalizeDir(properties.getDataDir()) + "/*.pdf";
@@ -70,15 +80,16 @@ public class DocumentImportService {
         for (Resource resource : resources) {
             String filename = resource.getFilename() != null ? resource.getFilename() : "unknown.pdf";
             DocumentMetadata metadata = metadataRegistry.resolve(filename);
-            results.add(importPdfBytes(resource.getInputStream().readAllBytes(), filename, metadata));
+            results.add(importPdfBytes(resource.getInputStream().readAllBytes(), filename, metadata, null, null));
         }
         log.info("Imported {} PDF(s) from {}", results.size(), pattern);
         return results;
     }
 
-    private DocumentImportResult importPdfBytes(byte[] pdfBytes, String filename, DocumentMetadata metadata)
+    private DocumentImportResult importPdfBytes(byte[] pdfBytes, String filename, DocumentMetadata metadata,
+                                                String documentId, RagSplitStrategy strategy)
             throws IOException {
-        List<Document> documents = documentService.parsePdf(pdfBytes, filename, metadata);
+        List<Document> documents = documentService.parsePdf(pdfBytes, filename, metadata, documentId, strategy);
         List<String> ids = ragService.addProcessedDocuments(documents);
         return new DocumentImportResult(filename, metadata, ids.size(), ids);
     }

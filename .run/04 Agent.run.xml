@@ -1,0 +1,10 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="04 Agent" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot">
+    <module name="mall-order-agent" />
+    <option name="ACTIVE_PROFILES" value="demo" />
+    <option name="SPRING_BOOT_MAIN_CLASS" value="com.css.mallorderagent.MallOrderAgentApplication" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>安全管理 · 商城订单 Agent</title>
+  <link rel="stylesheet" href="/auth.css">
+</head>
+<body class="admin-body">
+<header class="admin-header">
+  <div class="brand"><span class="brand-mark">OA</span><div><strong>安全管理</strong><span id="adminName">管理员</span></div></div>
+  <button class="secondary compact" id="logoutButton" type="button">退出</button>
+</header>
+<main class="admin-shell">
+  <nav class="admin-tabs" aria-label="管理视图">
+    <button class="tab active" data-tab="users" type="button">账户</button>
+    <button class="tab" data-tab="tokens" type="button">评测令牌</button>
+    <button class="tab" data-tab="audit" type="button">安全审计</button>
+  </nav>
+
+  <section class="admin-section" id="usersPanel">
+    <div class="section-heading"><div><h1>账户</h1><p>业务身份只能绑定一个登录账户</p></div><button class="primary compact" id="openCreateUser" type="button">新增账户</button></div>
+    <form class="inline-form hidden" id="createUserForm">
+      <label>用户名<input id="newUsername" autocomplete="off" placeholder="例如 sales.newuser" required></label>
+      <label>业务身份<select id="newIdentity" required></select></label>
+      <label>临时密码<input id="newPassword" type="password" autocomplete="new-password" minlength="12" maxlength="72" required></label>
+      <button class="primary compact" type="submit">创建</button>
+      <button class="secondary compact" id="cancelCreateUser" type="button">取消</button>
+    </form>
+    <p class="notice" id="userNotice" role="status"></p>
+    <div class="table-wrap"><table><thead><tr><th>账户</th><th>身份</th><th>角色</th><th>状态</th><th>上次登录</th><th>操作</th></tr></thead><tbody id="userRows"></tbody></table></div>
+  </section>
+
+  <section class="admin-section hidden" id="tokensPanel">
+    <div class="section-heading"><div><h1>评测令牌</h1><p>明文只在创建时显示一次</p></div><button class="primary compact" id="openCreateToken" type="button">新建令牌</button></div>
+    <form class="inline-form hidden" id="createTokenForm">
+      <label>名称<input id="tokenName" placeholder="AgentInsight" required></label>
+      <label>有效天数<input id="tokenDays" type="number" value="90" min="1" max="365" required></label>
+      <button class="primary compact" type="submit">创建</button>
+      <button class="secondary compact" id="cancelCreateToken" type="button">取消</button>
+    </form>
+    <div class="one-time-token hidden" id="oneTimeToken"><strong>新令牌</strong><code id="rawToken"></code><button class="secondary compact" id="copyToken" type="button">复制</button></div>
+    <p class="notice" id="tokenNotice" role="status"></p>
+    <div class="table-wrap"><table><thead><tr><th>名称</th><th>前缀</th><th>范围</th><th>有效期</th><th>最后使用</th><th>操作</th></tr></thead><tbody id="tokenRows"></tbody></table></div>
+  </section>
+
+  <section class="admin-section hidden" id="auditPanel">
+    <div class="section-heading"><div><h1>安全审计</h1><p>保留 180 天，用户和资源以脱敏指纹显示</p></div><button class="secondary compact" id="refreshAudit" type="button">刷新</button></div>
+    <div class="table-wrap"><table><thead><tr><th>时间</th><th>事件</th><th>主体</th><th>资源</th><th>结果</th><th>来源</th></tr></thead><tbody id="auditRows"></tbody></table></div>
+  </section>
+</main>
+<dialog id="passwordDialog">
+  <form method="dialog" id="resetPasswordForm">
+    <h2>设置临时密码</h2><p id="resetTarget"></p>
+    <label>临时密码<input id="resetPassword" type="password" minlength="12" maxlength="72" required></label>
+    <p class="notice" id="resetNotice"></p>
+    <div class="dialog-actions"><button class="secondary compact" value="cancel" type="button" id="cancelReset">取消</button><button class="primary compact" type="submit">确认重置</button></div>
+  </form>
+</dialog>
+<dialog id="impersonationDialog">
+  <form method="dialog" id="impersonationForm">
+    <h2>进入演示身份</h2><p id="impersonationTarget"></p>
+    <label>管理员密码<input id="impersonationPassword" type="password" autocomplete="current-password" required></label>
+    <label>演示原因<input id="impersonationReason" minlength="5" maxlength="200" required></label>
+    <p class="notice" id="impersonationNotice"></p>
+    <div class="dialog-actions"><button class="secondary compact" type="button" id="cancelImpersonation">取消</button><button class="primary compact" type="submit">进入</button></div>
+  </form>
+</dialog>
+<script src="/admin.js" defer></script>
+</body>
+</html>

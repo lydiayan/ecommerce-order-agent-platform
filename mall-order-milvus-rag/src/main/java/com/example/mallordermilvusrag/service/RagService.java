@@ -4,25 +4,35 @@ import com.example.mallordermilvusrag.config.RagDocumentProperties;
 import com.example.mallordermilvusrag.dto.DocumentMetadata;
 import com.example.mallordermilvusrag.dto.SearchRequest;
 import com.example.mallordermilvusrag.dto.SearchResponse;
+import com.example.mallordermilvusrag.splitter.api.RagContentType;
+import com.example.mallordermilvusrag.splitter.api.RagSplitStrategy;
+import com.example.mallordermilvusrag.splitter.model.ChunkLevel;
+import com.example.mallordermilvusrag.splitter.model.RagChunkMetadata;
 import com.example.mallordermilvusrag.tracing.RagTraceOperations;
 import com.example.mallorderobservability.trace.RagTraceScope;
+import com.example.mallorderobservability.trace.TracePrivacy;
 import com.example.mallorderobservability.trace.RagTraceService;
 import io.milvus.client.MilvusServiceClient;
 import io.milvus.common.clientenum.ConsistencyLevelEnum;
 import io.milvus.grpc.DataType;
 import io.milvus.grpc.DescribeCollectionResponse;
 import io.milvus.grpc.MutationResult;
+import io.milvus.grpc.QueryResults;
 import io.milvus.grpc.SearchResults;
 import io.milvus.param.IndexType;
 import io.milvus.param.MetricType;
 import io.milvus.param.R;
 import io.milvus.param.RpcStatus;
 import io.milvus.param.collection.*;
+import io.milvus.param.dml.DeleteParam;
 import io.milvus.param.dml.InsertParam;
+import io.milvus.param.dml.QueryParam;
 import io.milvus.param.dml.SearchParam;
+import io.milvus.param.dml.UpsertParam;
 import io.milvus.param.index.CreateIndexParam;
 import io.milvus.response.SearchResultsWrapper;
 import io.milvus.response.SearchResultsWrapper.IDScore;
+import io.milvus.response.QueryResultsWrapper;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,8 +52,10 @@ public class RagService {
 
     private static final Logger log = LoggerFactory.getLogger(RagService.class);
 
-    static final String COLLECTION_NAME = "mall_rag_v2";
-    private static final int DIMENSION = 1536;
+    private static final List<String> CHUNK_OUTPUT_FIELDS = List.of(
+            "id", "content", "source", "department", "role", "version", "create_time",
+            "document_id", "parent_id", "chunk_level", "chunk_index", "total_chunks",
+            "strategy", "content_type", "title_path", "start_offset", "end_offset");
 
     private final MilvusServiceClient milvusClient;
     private final EmbeddingModel embeddingModel;
@@ -51,6 +63,8 @@ public class RagService {
     private final DashScopeRerankService rerankService;
     private final RagDocumentProperties ragDocumentProperties;
     private final RagTraceService ragTraceService;
+    private final String collectionName;
+    private final int dimensions;
 
     private volatile boolean collectionReady = false;
 
@@ -66,20 +80,41 @@ public class RagService {
         this.rerankService = rerankService;
         this.ragDocumentProperties = ragDocumentProperties;
         this.ragTraceService = ragTraceService;
+        this.collectionName = ragDocumentProperties.getCollectionName();
+        this.dimensions = ragDocumentProperties.getDimensions();
     }
 
     // ==================== 集合初始化 ====================
 
     @PostConstruct
     void ensureCollection() {
+        R<Boolean> exists = milvusClient.hasCollection(HasCollectionParam.newBuilder()
+                .withCollectionName(collectionName).build());
+        if (exists.getStatus() != R.Status.Success.getCode()) {
+            throw new IllegalStateException("Failed to check collection " + collectionName);
+        }
+
         // 检查集合是否存在
         DescribeCollectionParam describeParam = DescribeCollectionParam.newBuilder()
-                .withCollectionName(COLLECTION_NAME)
+                .withCollectionName(collectionName)
                 .build();
-        R<DescribeCollectionResponse> describeResult = milvusClient.describeCollection(describeParam);
 
-        if (describeResult.getStatus() == R.Status.Success.getCode()) {
-            log.info("Collection already exists: {}", COLLECTION_NAME);
+        if (Boolean.TRUE.equals(exists.getData())) {
+            R<DescribeCollectionResponse> describeResult = milvusClient.describeCollection(describeParam);
+            if (describeResult.getStatus() != R.Status.Success.getCode()) {
+                throw new IllegalStateException("Failed to describe collection " + collectionName);
+            }
+            Set<String> fields = describeResult.getData().getSchema().getFieldsList().stream()
+                    .map(field -> field.getName()).collect(Collectors.toSet());
+            Set<String> missing = new LinkedHashSet<>(CHUNK_OUTPUT_FIELDS);
+            missing.add("embedding");
+            missing.removeAll(fields);
+            if (!missing.isEmpty()) {
+                throw new IllegalStateException("Collection " + collectionName
+                        + " uses an incompatible schema; missing fields: " + missing);
+            }
+            log.info("Collection already exists: {}", collectionName);
+            loadCollection();
             collectionReady = true;
             return;
         }
@@ -128,15 +163,26 @@ public class RagService {
                 .withMaxLength(64)
                 .build();
 
+        FieldType documentIdField = varcharField("document_id", 64);
+        FieldType parentIdField = varcharField("parent_id", 64);
+        FieldType chunkLevelField = varcharField("chunk_level", 16);
+        FieldType strategyField = varcharField("strategy", 32);
+        FieldType contentTypeField = varcharField("content_type", 32);
+        FieldType titlePathField = varcharField("title_path", 2048);
+        FieldType chunkIndexField = int64Field("chunk_index");
+        FieldType totalChunksField = int64Field("total_chunks");
+        FieldType startOffsetField = int64Field("start_offset");
+        FieldType endOffsetField = int64Field("end_offset");
+
         FieldType embeddingField = FieldType.newBuilder()
                 .withName("embedding")
                 .withDataType(DataType.FloatVector)
-                .withDimension(DIMENSION)
+                .withDimension(dimensions)
                 .build();
 
         CreateCollectionParam createParam = CreateCollectionParam.newBuilder()
-                .withCollectionName(COLLECTION_NAME)
-                .withDescription("RAG collection with typed metadata fields")
+                .withCollectionName(collectionName)
+                .withDescription("RAG v3 collection with typed splitter metadata and parent-child chunks")
                 .addFieldType(idField)
                 .addFieldType(contentField)
                 .addFieldType(sourceField)
@@ -144,19 +190,29 @@ public class RagService {
                 .addFieldType(roleField)
                 .addFieldType(versionField)
                 .addFieldType(createTimeField)
+                .addFieldType(documentIdField)
+                .addFieldType(parentIdField)
+                .addFieldType(chunkLevelField)
+                .addFieldType(chunkIndexField)
+                .addFieldType(totalChunksField)
+                .addFieldType(strategyField)
+                .addFieldType(contentTypeField)
+                .addFieldType(titlePathField)
+                .addFieldType(startOffsetField)
+                .addFieldType(endOffsetField)
                 .addFieldType(embeddingField)
                 .build();
 
         R<RpcStatus> createResult = milvusClient.createCollection(createParam);
         if (createResult.getStatus() != R.Status.Success.getCode()) {
-            log.error("Failed to create collection {}: {}", COLLECTION_NAME, createResult.getMessage());
+            log.error("Failed to create collection {}: {}", collectionName, createResult.getMessage());
             return;
         }
-        log.info("Created collection: {}", COLLECTION_NAME);
+        log.info("Created collection: {}", collectionName);
 
         // ── 向量索引 ──
         CreateIndexParam vectorIndexParam = CreateIndexParam.newBuilder()
-                .withCollectionName(COLLECTION_NAME)
+                .withCollectionName(collectionName)
                 .withFieldName("embedding")
                 .withIndexType(IndexType.IVF_FLAT)
                 .withMetricType(MetricType.COSINE)
@@ -166,36 +222,59 @@ public class RagService {
         if (vectorIndexResult.getStatus() != R.Status.Success.getCode()) {
             log.warn("Failed to create embedding index: {}", vectorIndexResult.getMessage());
         } else {
-            log.info("Created embedding index on {}", COLLECTION_NAME);
+            log.info("Created embedding index on {}", collectionName);
         }
 
         // ── 标量索引（高频过滤字段） ──
         createScalarIndex("role");
         createScalarIndex("department");
         createScalarIndex("source");
+        createScalarIndex("document_id");
+        createScalarIndex("parent_id");
+        createScalarIndex("chunk_level");
 
         // ── 加载集合到内存 ──
-        LoadCollectionParam loadParam = LoadCollectionParam.newBuilder()
-                .withCollectionName(COLLECTION_NAME)
-                .build();
-        milvusClient.loadCollection(loadParam);
+        loadCollection();
 
         collectionReady = true;
-        log.info("Collection {} initialized and loaded", COLLECTION_NAME);
+        log.info("Collection {} initialized and loaded", collectionName);
+    }
+
+    private void loadCollection() {
+        LoadCollectionParam loadParam = LoadCollectionParam.newBuilder()
+                .withCollectionName(collectionName)
+                .withSyncLoad(true)
+                .withSyncLoadWaitingInterval(200L)
+                .withSyncLoadWaitingTimeout(30L)
+                .build();
+        R<RpcStatus> loadResult = milvusClient.loadCollection(loadParam);
+        if (loadResult.getStatus() != R.Status.Success.getCode()) {
+            throw new IllegalStateException("Failed to load collection " + collectionName
+                    + ": " + loadResult.getMessage());
+        }
     }
 
     private void createScalarIndex(String fieldName) {
         CreateIndexParam indexParam = CreateIndexParam.newBuilder()
-                .withCollectionName(COLLECTION_NAME)
+                .withCollectionName(collectionName)
                 .withFieldName(fieldName)
                 .withIndexType(IndexType.TRIE)  // 字符串标量索引
                 .build();
         R<RpcStatus> result = milvusClient.createIndex(indexParam);
         if (result.getStatus() == R.Status.Success.getCode()) {
-            log.info("Created scalar index on {}.{}", COLLECTION_NAME, fieldName);
+            log.info("Created scalar index on {}.{}", collectionName, fieldName);
         } else {
             log.warn("Scalar index on {} may already exist: {}", fieldName, result.getMessage());
         }
+    }
+
+    private static FieldType varcharField(String name, int maxLength) {
+        return FieldType.newBuilder().withName(name).withDataType(DataType.VarChar)
+                .withMaxLength(maxLength).build();
+    }
+
+    private static FieldType int64Field(String name) {
+        return FieldType.newBuilder().withName(name).withDataType(DataType.Int64).build();
     }
 
     // ==================== 写操作 ====================
@@ -204,12 +283,17 @@ public class RagService {
      * 添加文档到向量库（自动分割 + embedding + 存储）
      */
     public List<String> addDocument(String text, DocumentMetadata metadata) {
+        return addDocument(text, metadata, null, null, null);
+    }
+
+    public List<String> addDocument(String text, DocumentMetadata metadata, String documentId,
+                                    RagSplitStrategy strategy, RagContentType contentType) {
         log.info("Adding document to vector store, text length={}", text.length());
 
-        List<Document> chunks = documentService.splitText(text, metadata);
+        List<Document> chunks = documentService.splitText(text, metadata, documentId, strategy, contentType);
         log.info("Document split into {} chunks", chunks.size());
 
-        return insertChunks(chunks, metadata);
+        return replaceChunks(chunks);
     }
 
     /**
@@ -218,14 +302,11 @@ public class RagService {
     public List<String> addDocuments(List<DocumentService.DocumentInput> inputs) {
         log.info("Adding {} documents to vector store", inputs.size());
 
-        List<Document> allChunks = documentService.splitTexts(inputs);
-        log.info("Documents split into {} chunks", allChunks.size());
-
-        // 按原始 metadata 分组插入
         List<String> allIds = new ArrayList<>();
         for (DocumentService.DocumentInput input : inputs) {
-            List<Document> inputChunks = documentService.splitText(input.text(), input.metadata());
-            allIds.addAll(insertChunks(inputChunks, input.metadata()));
+            List<Document> inputChunks = documentService.splitText(input.text(), input.metadata(),
+                    input.documentId(), input.strategy(), input.contentType());
+            allIds.addAll(replaceChunks(inputChunks));
         }
         return allIds;
     }
@@ -237,10 +318,12 @@ public class RagService {
     public List<String> addProcessedDocuments(List<Document> documents) {
         log.info("Adding {} processed documents to vector store", documents.size());
 
+        Map<String, List<Document>> byDocument = documents.stream().collect(Collectors.groupingBy(
+                document -> stringMetadata(document.getMetadata(), RagChunkMetadata.DOCUMENT_ID, ""),
+                LinkedHashMap::new, Collectors.toList()));
         List<String> ids = new ArrayList<>();
-        for (Document doc : documents) {
-            DocumentMetadata meta = DocumentMetadata.fromMap(doc.getMetadata());
-            ids.add(insertOne(doc, meta));
+        for (List<Document> chunks : byDocument.values()) {
+            ids.addAll(replaceChunks(chunks));
         }
         log.info("Documents stored with IDs: {}", ids);
         return ids;
@@ -248,26 +331,81 @@ public class RagService {
 
     // ==================== 内部：插入 ====================
 
-    private List<String> insertChunks(List<Document> chunks, DocumentMetadata metadata) {
+    private List<String> insertChunks(List<Document> chunks) {
         List<String> ids = new ArrayList<>();
         for (Document chunk : chunks) {
-            ids.add(insertOne(chunk, metadata));
+            ids.add(insertOne(chunk));
         }
         log.debug("Inserted {} chunks", ids.size());
         return ids;
     }
 
-    private String insertOne(Document chunk, DocumentMetadata metadata) {
+    private List<String> replaceChunks(List<Document> chunks) {
+        if (chunks.isEmpty()) {
+            return List.of();
+        }
+        String documentId = stringMetadata(chunks.get(0).getMetadata(), RagChunkMetadata.DOCUMENT_ID, "");
+        if (documentId.isBlank()) {
+            return insertChunks(chunks);
+        }
+        Set<String> oldIds = queryChunkIds(documentId);
+        List<String> newIds = insertChunks(chunks);
+        oldIds.removeAll(newIds);
+        deleteChunkIds(oldIds);
+        return newIds;
+    }
+
+    private Set<String> queryChunkIds(String documentId) {
+        QueryParam param = QueryParam.newBuilder()
+                .withCollectionName(collectionName)
+                .withExpr("document_id == \"" + escapeExpr(documentId) + "\"")
+                .withOutFields(List.of("id"))
+                .withConsistencyLevel(ConsistencyLevelEnum.STRONG)
+                .build();
+        R<QueryResults> result = milvusClient.query(param);
+        if (result.getStatus() != R.Status.Success.getCode()) {
+            throw new IllegalStateException("Failed to query existing chunks for document " + documentId);
+        }
+        Set<String> ids = new LinkedHashSet<>();
+        for (QueryResultsWrapper.RowRecord row : new QueryResultsWrapper(result.getData()).getRowRecords()) {
+            ids.add(asString(row.getFieldValues().get("id")));
+        }
+        return ids;
+    }
+
+    private void deleteChunkIds(Set<String> ids) {
+        if (ids.isEmpty()) {
+            return;
+        }
+        List<String> values = new ArrayList<>(ids);
+        for (int start = 0; start < values.size(); start += 500) {
+            int end = Math.min(start + 500, values.size());
+            String expr = values.subList(start, end).stream()
+                    .map(id -> "\"" + escapeExpr(id) + "\"")
+                    .collect(Collectors.joining(",", "id in [", "]"));
+            R<MutationResult> result = milvusClient.delete(DeleteParam.newBuilder()
+                    .withCollectionName(collectionName).withExpr(expr).build());
+            if (result.getStatus() != R.Status.Success.getCode()) {
+                throw new IllegalStateException("Failed to remove stale chunks");
+            }
+        }
+    }
+
+    private String insertOne(Document chunk) {
         if (!collectionReady) {
-            throw new IllegalStateException("Collection " + COLLECTION_NAME + " is not ready");
+            throw new IllegalStateException("Collection " + collectionName + " is not ready");
         }
 
         String id = chunk.getId();
         String text = chunk.getText();
-        List<Float> vector = generateEmbedding(text);
+        Map<String, Object> values = chunk.getMetadata();
+        DocumentMetadata metadata = DocumentMetadata.fromMap(values);
+        String chunkLevel = stringMetadata(values, RagChunkMetadata.CHUNK_LEVEL, ChunkLevel.STANDALONE.name());
+        List<Float> vector = ChunkLevel.PARENT.name().equals(chunkLevel)
+                ? Collections.nCopies(dimensions, 0.0f) : generateEmbedding(text);
 
-        InsertParam insertParam = InsertParam.newBuilder()
-                .withCollectionName(COLLECTION_NAME)
+        UpsertParam upsertParam = UpsertParam.newBuilder()
+                .withCollectionName(collectionName)
                 .withFields(List.of(
                         new InsertParam.Field("id", List.of(id)),
                         new InsertParam.Field("content", List.of(text)),
@@ -276,15 +414,25 @@ public class RagService {
                         new InsertParam.Field("role", List.of(nn(metadata.getRole()))),
                         new InsertParam.Field("version", List.of(nn(metadata.getVersion()))),
                         new InsertParam.Field("create_time", List.of(nn(metadata.getCreateTime()))),
+                        new InsertParam.Field("document_id", List.of(stringMetadata(values, RagChunkMetadata.DOCUMENT_ID, ""))),
+                        new InsertParam.Field("parent_id", List.of(stringMetadata(values, RagChunkMetadata.PARENT_ID, ""))),
+                        new InsertParam.Field("chunk_level", List.of(chunkLevel)),
+                        new InsertParam.Field("chunk_index", List.of(longMetadata(values, RagChunkMetadata.CHUNK_INDEX))),
+                        new InsertParam.Field("total_chunks", List.of(longMetadata(values, RagChunkMetadata.TOTAL_CHUNKS))),
+                        new InsertParam.Field("strategy", List.of(stringMetadata(values, RagChunkMetadata.STRATEGY, ""))),
+                        new InsertParam.Field("content_type", List.of(stringMetadata(values, RagChunkMetadata.CONTENT_TYPE, ""))),
+                        new InsertParam.Field("title_path", List.of(stringMetadata(values, RagChunkMetadata.TITLE_PATH, ""))),
+                        new InsertParam.Field("start_offset", List.of(longMetadata(values, RagChunkMetadata.START_OFFSET))),
+                        new InsertParam.Field("end_offset", List.of(longMetadata(values, RagChunkMetadata.END_OFFSET))),
                         new InsertParam.Field("embedding", List.of(vector))
                 ))
                 .build();
 
-        R<MutationResult> result = milvusClient.insert(insertParam);
+        R<MutationResult> result = milvusClient.upsert(upsertParam);
         if (result.getStatus() == R.Status.Success.getCode()) {
-            log.debug("Inserted chunk {}", id);
+            log.debug("Upserted chunk {}", id);
         } else {
-            log.error("Failed to insert chunk {}: {}", id, result.getMessage());
+            throw new IllegalStateException("Failed to upsert chunk " + id + ": " + result.getMessage());
         }
         return id;
     }
@@ -335,7 +483,9 @@ public class RagService {
                 request.getSourceFilter(),
                 request.getDepartmentFilter(),
                 request.getRoleFilter(),
-                request.getVersionFilter()
+                request.getVersionFilter(),
+                request.getDepartmentFilters(),
+                request.getRoleFilters()
         );
         if (!ragTraceService.isEnabled()) {
             return searchInternal(request, filterExpr, RagTraceScope.noop());
@@ -349,7 +499,8 @@ public class RagService {
         }
 
         Map<String, Object> attrs = new LinkedHashMap<>();
-        attrs.put("query", request.getQuery());
+        attrs.put("queryLength", request.getQuery() != null ? request.getQuery().length() : 0);
+        attrs.put("queryFingerprint", TracePrivacy.fingerprint(request.getQuery()));
         attrs.put("topK", request.getTopK());
         attrs.put("enableRerank", request.getEnableRerank());
 
@@ -384,16 +535,17 @@ public class RagService {
 
         int milvusTopK = enableRerank ? Math.max(recallTopK, topK) : topK;
 
-        log.info("Search: query='{}', topK={}, recallTopK={}, rerank={}, threshold={}, filter='{}'",
-                request.getQuery(), topK, milvusTopK, enableRerank, vectorThreshold, filterExpr);
+        log.info("Search: queryLength={}, topK={}, recallTopK={}, rerank={}, threshold={}, filterPresent={}",
+                request.getQuery().length(), topK, milvusTopK, enableRerank, vectorThreshold,
+                filterExpr != null && !filterExpr.isBlank());
 
         List<Float> queryVector = generateEmbedding(request.getQuery());
 
         List<SearchResponse.SearchHit> vectorHits;
         try (RagTraceScope milvusSpan = trace.child(RagTraceOperations.MILVUS, Map.of(
                 "topK", milvusTopK,
-                "filter", filterExpr != null ? filterExpr : ""))) {
-            vectorHits = queryMilvus(milvusTopK, vectorThreshold, filterExpr, queryVector);
+                "filterApplied", filterExpr != null && !filterExpr.isBlank()))) {
+            vectorHits = queryUniqueContexts(milvusTopK, vectorThreshold, filterExpr, queryVector);
             milvusSpan.attribute("recallCount", vectorHits.size());
         }
 
@@ -427,14 +579,9 @@ public class RagService {
                 continue;
             }
             SearchResponse.SearchHit original = vectorHits.get(item.index());
-            rerankedHits.add(new SearchResponse.SearchHit(
-                    original.getId(),
-                    original.getContent(),
-                    item.score(),
-                    original.getVectorScore(),
-                    item.score(),
-                    original.getMetadata()
-            ));
+            original.setScore(item.score());
+            original.setRerankScore(item.score());
+            rerankedHits.add(original);
         }
 
         log.info("Search returned {} hit(s) after rerank", rerankedHits.size());
@@ -444,22 +591,19 @@ public class RagService {
     private List<SearchResponse.SearchHit> queryMilvus(int topK, double threshold,
                                                         String filterExpr, List<Float> queryVector) {
 
-        List<String> outputFields = List.of("id", "content", "source", "department",
-                "role", "version", "create_time");
-
         SearchParam.Builder searchBuilder = SearchParam.newBuilder()
-                .withCollectionName(COLLECTION_NAME)
+                .withCollectionName(collectionName)
                 .withMetricType(MetricType.COSINE)
                 .withTopK(topK)
                 .withVectors(List.of(queryVector))
                 .withVectorFieldName("embedding")
                 .withParams("{\"nprobe\":16}")
-                .withOutFields(outputFields)
+                .withOutFields(CHUNK_OUTPUT_FIELDS)
                 .withConsistencyLevel(ConsistencyLevelEnum.EVENTUALLY);
 
-        if (filterExpr != null && !filterExpr.isBlank()) {
-            searchBuilder.withExpr(filterExpr);
-        }
+        String searchableChunks = "(chunk_level == \"CHILD\" || chunk_level == \"STANDALONE\")";
+        searchBuilder.withExpr(filterExpr == null || filterExpr.isBlank()
+                ? searchableChunks : searchableChunks + " && (" + filterExpr + ")");
 
         R<SearchResults> searchResult = milvusClient.search(searchBuilder.build());
         if (searchResult.getStatus() != R.Status.Success.getCode()) {
@@ -478,6 +622,16 @@ public class RagService {
             List<String> roles = (List<String>) wrapper.getFieldData("role", 0);
             List<String> versions = (List<String>) wrapper.getFieldData("version", 0);
             List<String> createTimes = (List<String>) wrapper.getFieldData("create_time", 0);
+            List<String> documentIds = (List<String>) wrapper.getFieldData("document_id", 0);
+            List<String> parentIds = (List<String>) wrapper.getFieldData("parent_id", 0);
+            List<String> chunkLevels = (List<String>) wrapper.getFieldData("chunk_level", 0);
+            List<Long> chunkIndexes = (List<Long>) wrapper.getFieldData("chunk_index", 0);
+            List<Long> totalChunks = (List<Long>) wrapper.getFieldData("total_chunks", 0);
+            List<String> strategies = (List<String>) wrapper.getFieldData("strategy", 0);
+            List<String> contentTypes = (List<String>) wrapper.getFieldData("content_type", 0);
+            List<String> titlePaths = (List<String>) wrapper.getFieldData("title_path", 0);
+            List<Long> startOffsets = (List<Long>) wrapper.getFieldData("start_offset", 0);
+            List<Long> endOffsets = (List<Long>) wrapper.getFieldData("end_offset", 0);
             List<IDScore> idScores = wrapper.getIDScore(0);
 
             // 构建 ID → score 映射
@@ -502,14 +656,26 @@ public class RagService {
                 meta.setVersion(safeGet(versions, i, null));
                 meta.setCreateTime(safeGet(createTimes, i, null));
 
-                hits.add(new SearchResponse.SearchHit(
+                SearchResponse.SearchHit hit = new SearchResponse.SearchHit(
                         safeGet(ids, i, ""),
                         safeGet(contents, i, ""),
                         score,
                         score,
                         null,
                         meta
-                ));
+                );
+                hit.setDocumentId(safeGet(documentIds, i, ""));
+                hit.setParentId(safeGet(parentIds, i, ""));
+                hit.setChunkLevel(safeGet(chunkLevels, i, ChunkLevel.STANDALONE.name()));
+                hit.setChunkIndex(safeGet(chunkIndexes, i, 0L).intValue());
+                hit.setTotalChunks(safeGet(totalChunks, i, 0L).intValue());
+                hit.setStrategy(safeGet(strategies, i, ""));
+                hit.setContentType(safeGet(contentTypes, i, ""));
+                hit.setTitlePath(safeGet(titlePaths, i, ""));
+                hit.setStartOffset(safeGet(startOffsets, i, 0L));
+                hit.setEndOffset(safeGet(endOffsets, i, 0L));
+                hit.setMatchedChunks(List.of(toMatchedChunk(hit)));
+                hits.add(hit);
             }
         } catch (Exception e) {
             log.warn("Error parsing search results: {}", e.getMessage());
@@ -519,6 +685,114 @@ public class RagService {
         return hits;
     }
 
+    private List<SearchResponse.SearchHit> queryUniqueContexts(int desiredCount, double threshold,
+                                                                String filterExpr, List<Float> queryVector) {
+        int recall = Math.max(desiredCount * 3, desiredCount);
+        int maxRecall = Math.max(recall, 16_384);
+        List<SearchResponse.SearchHit> aggregated = List.of();
+        while (true) {
+            List<SearchResponse.SearchHit> raw = queryMilvus(recall, threshold, filterExpr, queryVector);
+            aggregated = aggregateParentContext(raw);
+            if (aggregated.size() >= desiredCount || raw.size() < recall || recall >= maxRecall) {
+                return aggregated;
+            }
+            recall = Math.min(recall * 2, maxRecall);
+        }
+    }
+
+    private List<SearchResponse.SearchHit> aggregateParentContext(List<SearchResponse.SearchHit> hits) {
+        Map<String, List<SearchResponse.SearchHit>> groupedChildren = new LinkedHashMap<>();
+        List<SearchResponse.SearchHit> standalone = new ArrayList<>();
+        for (SearchResponse.SearchHit hit : hits) {
+            if (ChunkLevel.CHILD.name().equals(hit.getChunkLevel())
+                    && hit.getParentId() != null && !hit.getParentId().isBlank()) {
+                groupedChildren.computeIfAbsent(hit.getParentId(), ignored -> new ArrayList<>()).add(hit);
+            } else {
+                standalone.add(hit);
+            }
+        }
+        if (groupedChildren.isEmpty()) {
+            return hits;
+        }
+
+        Map<String, SearchResponse.SearchHit> parents = queryChunksById(groupedChildren.keySet());
+        List<SearchResponse.SearchHit> aggregated = new ArrayList<>(standalone);
+        for (Map.Entry<String, List<SearchResponse.SearchHit>> entry : groupedChildren.entrySet()) {
+            List<SearchResponse.SearchHit> children = entry.getValue();
+            SearchResponse.SearchHit best = children.stream()
+                    .max(Comparator.comparingDouble(SearchResponse.SearchHit::getVectorScore)).orElseThrow();
+            SearchResponse.SearchHit parent = parents.get(entry.getKey());
+            if (parent == null) {
+                log.warn("Parent chunk {} not found; returning best child", entry.getKey());
+                best.setMatchedChunks(children.stream().map(RagService::toMatchedChunk).toList());
+                aggregated.add(best);
+                continue;
+            }
+            parent.setScore(best.getVectorScore());
+            parent.setVectorScore(best.getVectorScore());
+            parent.setParentId(parent.getId());
+            parent.setMatchedChunks(children.stream()
+                    .sorted(Comparator.comparingDouble(SearchResponse.SearchHit::getVectorScore).reversed())
+                    .map(RagService::toMatchedChunk).toList());
+            aggregated.add(parent);
+        }
+        return aggregated.stream()
+                .sorted(Comparator.comparingDouble(SearchResponse.SearchHit::getVectorScore).reversed())
+                .toList();
+    }
+
+    private Map<String, SearchResponse.SearchHit> queryChunksById(Collection<String> ids) {
+        if (ids.isEmpty()) return Map.of();
+        String expr = ids.stream().map(id -> "\"" + escapeExpr(id) + "\"")
+                .collect(Collectors.joining(",", "id in [", "]"));
+        QueryParam param = QueryParam.newBuilder()
+                .withCollectionName(collectionName)
+                .withExpr(expr)
+                .withOutFields(CHUNK_OUTPUT_FIELDS)
+                .withConsistencyLevel(ConsistencyLevelEnum.EVENTUALLY)
+                .build();
+        R<QueryResults> result = milvusClient.query(param);
+        if (result.getStatus() != R.Status.Success.getCode()) {
+            log.warn("Parent query failed: {}", result.getMessage());
+            return Map.of();
+        }
+        Map<String, SearchResponse.SearchHit> parents = new LinkedHashMap<>();
+        for (QueryResultsWrapper.RowRecord row : new QueryResultsWrapper(result.getData()).getRowRecords()) {
+            Map<String, Object> values = row.getFieldValues();
+            SearchResponse.SearchHit hit = hitFromRow(values);
+            parents.put(hit.getId(), hit);
+        }
+        return parents;
+    }
+
+    private static SearchResponse.SearchHit hitFromRow(Map<String, Object> values) {
+        DocumentMetadata metadata = new DocumentMetadata();
+        metadata.setSource(asString(values.get("source")));
+        metadata.setDepartment(asString(values.get("department")));
+        metadata.setRole(asString(values.get("role")));
+        metadata.setVersion(asString(values.get("version")));
+        metadata.setCreateTime(asString(values.get("create_time")));
+        SearchResponse.SearchHit hit = new SearchResponse.SearchHit(asString(values.get("id")),
+                asString(values.get("content")), 0.0, 0.0, null, metadata);
+        hit.setDocumentId(asString(values.get("document_id")));
+        hit.setParentId(asString(values.get("parent_id")));
+        hit.setChunkLevel(asString(values.get("chunk_level")));
+        hit.setChunkIndex(asInt(values.get("chunk_index")));
+        hit.setTotalChunks(asInt(values.get("total_chunks")));
+        hit.setStrategy(asString(values.get("strategy")));
+        hit.setContentType(asString(values.get("content_type")));
+        hit.setTitlePath(asString(values.get("title_path")));
+        hit.setStartOffset(asLong(values.get("start_offset")));
+        hit.setEndOffset(asLong(values.get("end_offset")));
+        return hit;
+    }
+
+    private static SearchResponse.MatchedChunk toMatchedChunk(SearchResponse.SearchHit hit) {
+        return new SearchResponse.MatchedChunk(hit.getId(), hit.getContent(),
+                hit.getVectorScore() == null ? hit.getScore() : hit.getVectorScore(),
+                hit.getChunkIndex(), hit.getStartOffset(), hit.getEndOffset());
+    }
+
     // ==================== 工具方法 ====================
 
     /**
@@ -526,6 +800,12 @@ public class RagService {
      */
     public static String buildFilterExpression(String source, String department,
                                                 String role, String version) {
+        return buildFilterExpression(source, department, role, version, null, null);
+    }
+
+    public static String buildFilterExpression(String source, String department,
+                                                String role, String version,
+                                                List<String> departments, List<String> roles) {
         List<String> parts = new ArrayList<>();
         if (source != null && !source.isBlank()) {
             parts.add("source == \"" + escapeExpr(source) + "\"");
@@ -539,6 +819,22 @@ public class RagService {
         if (version != null && !version.isBlank()) {
             parts.add("version == \"" + escapeExpr(version) + "\"");
         }
+        List<String> access = new ArrayList<>();
+        if (roles != null && !roles.isEmpty()) {
+            access.add("role in [" + roles.stream()
+                    .filter(value -> value != null && !value.isBlank())
+                    .map(value -> "\"" + escapeExpr(value) + "\"")
+                    .collect(java.util.stream.Collectors.joining(", ")) + "]");
+        }
+        if (departments != null && !departments.isEmpty()) {
+            access.add("department in [" + departments.stream()
+                    .filter(value -> value != null && !value.isBlank())
+                    .map(value -> "\"" + escapeExpr(value) + "\"")
+                    .collect(java.util.stream.Collectors.joining(", ")) + "]");
+        }
+        if (!access.isEmpty()) {
+            parts.add("(" + String.join(" || ", access) + ")");
+        }
         return parts.isEmpty() ? null : String.join(" && ", parts);
     }
 
@@ -549,6 +845,10 @@ public class RagService {
 
     private List<Float> generateEmbedding(String text) {
         float[] vector = embeddingModel.embed(text);
+        if (vector.length != dimensions) {
+            throw new IllegalStateException("Embedding dimension " + vector.length
+                    + " does not match configured Milvus dimension " + dimensions);
+        }
         List<Float> result = new ArrayList<>(vector.length);
         for (float v : vector) {
             result.add(v);
@@ -558,6 +858,34 @@ public class RagService {
 
     private String nn(String value) {
         return value != null ? value : "";
+    }
+
+    private static String stringMetadata(Map<String, Object> metadata, String key, String defaultValue) {
+        Object value = metadata.get(key);
+        return value == null ? defaultValue : value.toString();
+    }
+
+    private static long longMetadata(Map<String, Object> metadata, String key) {
+        return asLong(metadata.get(key));
+    }
+
+    private static String asString(Object value) {
+        return value == null ? "" : value.toString();
+    }
+
+    private static long asLong(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        if (value == null || value.toString().isBlank()) {
+            return 0L;
+        }
+        return Long.parseLong(value.toString());
+    }
+
+    private static int asInt(Object value) {
+        long parsed = asLong(value);
+        return parsed > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) parsed;
     }
 
     private <T> T safeGet(List<T> list, int index, T defaultValue) {
@@ -574,7 +902,7 @@ public class RagService {
     public Map<String, Object> stats() {
         return Map.of(
                 "status", collectionReady ? "connected" : "not_ready",
-                "collection", COLLECTION_NAME,
+                "collection", collectionName,
                 "service", "Milvus RAG Service (custom schema)"
         );
     }

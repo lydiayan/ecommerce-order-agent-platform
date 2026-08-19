@@ -34,7 +34,7 @@ public final class PdfTextCleaner {
         cleaned = cleaned.replaceAll("(第[0-9一二三四五六七八九十百千]+章)", "\n\n$1");
         cleaned = cleaned.replaceAll("(第[0-9一二三四五六七八九十百千]+条)", "\n$1");
 
-        // 中文句末标点后换行，供 TokenTextSplitter 在 minChunkSizeChars 处找断点
+        // 中文句末标点后换行，让后续递归、结构等切分器优先在完整语句边界断开。
         cleaned = cleaned.replaceAll("([。！？；])", "$1\n");
 
         // 保留章之间的空行，其余多余空行压缩

@@ -1,0 +1,10 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="02 MCP Server" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot">
+    <module name="mall-order-cmp-server" />
+    <option name="ACTIVE_PROFILES" value="demo" />
+    <option name="SPRING_BOOT_MAIN_CLASS" value="com.example.mallordercmpserver.MallOrderCmpServerApplication" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>

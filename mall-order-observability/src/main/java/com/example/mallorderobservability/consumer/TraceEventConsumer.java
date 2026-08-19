@@ -38,6 +38,7 @@ public class TraceEventConsumer implements RocketMQListener<String> {
             log.debug("indexed trace event traceId={} type={}", event.getTraceId(), event.getEventType());
         } catch (Exception e) {
             log.error("failed to consume trace event: {}", e.getMessage(), e);
+            throw new IllegalStateException("failed to index trace event", e);
         }
     }
 }

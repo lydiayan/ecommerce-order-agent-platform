@@ -1,7 +1,22 @@
-.DS_Store
+# Maven
 target/
-*.class
+**/target/
+.flattened-pom.xml
+**/.flattened-pom.xml
+
+# IDE and OS
 .idea/
 .vscode/
+.ua/
 *.iml
+.DS_Store
 
+# Local secrets and runtime files
+.env
+logs/
+run/
+*.log
+
+# Generated files
+mall-order-milvus-rag/src/main/resources/data/generated/
+tmp/

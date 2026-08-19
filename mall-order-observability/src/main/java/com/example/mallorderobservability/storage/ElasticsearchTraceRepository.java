@@ -13,6 +13,7 @@ import com.example.mallorderobservability.config.ObservabilityProperties;
 import com.example.mallorderobservability.model.TraceEvent;
 import com.example.mallorderobservability.model.TraceEventType;
 import com.example.mallorderobservability.trace.RagTraceService;
+import com.example.mallorderobservability.trace.TracePrivacy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -104,10 +105,20 @@ public class ElasticsearchTraceRepository {
                                 .properties("chunkCount", Property.of(p -> p.long_(l -> l)))
                                 .properties("historyCount", Property.of(p -> p.long_(l -> l)))
                                 .properties("memoryCount", Property.of(p -> p.long_(l -> l)))
-                                .properties("systemPrompt", Property.of(p -> p.text(t -> t.index(false))))
-                                .properties("userQuery", Property.of(p -> p.text(t -> t.index(true))))
-                                .properties("input", Property.of(p -> p.text(t -> t.index(false))))
-                                .properties("output", Property.of(p -> p.text(t -> t.index(false))))
+                                // Agent / 多租户 / 对话关联
+                                .properties("agentName", Property.of(p -> p.keyword(k -> k)))
+                                .properties("agentVersion", Property.of(p -> p.keyword(k -> k)))
+                                .properties("conversationId", Property.of(p -> p.keyword(k -> k)))
+                                .properties("tenantId", Property.of(p -> p.keyword(k -> k)))
+                                // 时延与检索质量
+                                .properties("ttftMs", Property.of(p -> p.long_(l -> l)))
+                                .properties("ragScore", Property.of(p -> p.float_(f -> f)))
+                                // Tool 调用详情（nested）
+                                .properties("toolCalls", Property.of(p -> p.nested(n -> n
+                                        .properties("toolName", Property.of(tp -> tp.keyword(k -> k)))
+                                        .properties("status", Property.of(tp -> tp.keyword(k -> k)))
+                                        .properties("errorCode", Property.of(tp -> tp.integer(i -> i)))
+                                        .properties("durationMs", Property.of(tp -> tp.long_(l -> l))))))
                                 .properties("attributes", Property.of(p -> p.object(o -> o.enabled(true))))))));
                 log.info("Created Elasticsearch index: {}", index);
             }
@@ -128,9 +139,10 @@ public class ElasticsearchTraceRepository {
         doc.put("timestampMs", event.getTimestampMs());
         doc.put("timestamp", event.getTimestamp());
         doc.put("durationMs", event.getDurationMs());
-        doc.put("errorMessage", event.getErrorMessage());
+        doc.put("errorMessage", TracePrivacy.sanitizeErrorLabel(event.getErrorMessage()));
 
-        Map<String, Object> attributes = event.getAttributes();
+        Map<String, Object> attributes = TracePrivacy.sanitizeAttributes(event.getAttributes());
+        promoteCommonAgentFields(doc, attributes);
         if (RagTraceService.LLM_OPERATION.equals(event.getOperation())
                 && event.getEventType() == TraceEventType.SPAN_END) {
             enrichLlmDocument(doc, attributes);
@@ -141,6 +153,22 @@ public class ElasticsearchTraceRepository {
             doc.put("attributes", attributes);
         }
         return doc;
+    }
+
+    /**
+     * 将 Agent / 多租户 / 时延 / Tool 等通用字段从 attributes 提升到文档顶层，便于 ES 检索与聚合。
+     */
+    private void promoteCommonAgentFields(Map<String, Object> doc, Map<String, Object> attributes) {
+        if (attributes == null || attributes.isEmpty()) {
+            return;
+        }
+        copyIfPresent(doc, attributes, "agentName");
+        copyIfPresent(doc, attributes, "agentVersion");
+        copyIfPresent(doc, attributes, "conversationId");
+        copyIfPresent(doc, attributes, "tenantId");
+        copyIfPresent(doc, attributes, "ttftMs");
+        copyIfPresent(doc, attributes, "ragScore");
+        copyIfPresent(doc, attributes, "toolCalls");
     }
 
     /**
@@ -156,7 +184,6 @@ public class ElasticsearchTraceRepository {
         copyIfPresent(doc, attributes, "promptVersion");
         copyIfPresent(doc, attributes, "promptLength");
         copyIfPresent(doc, attributes, "chunkCount");
-        copyIfPresent(doc, attributes, "systemPrompt");
         copyIfPresent(doc, attributes, "historyCount");
         copyIfPresent(doc, attributes, "memoryCount");
 
@@ -183,9 +210,6 @@ public class ElasticsearchTraceRepository {
 
         copyIfPresent(doc, attributes, "model");
         copyIfPresent(doc, attributes, "finishReason");
-        copyIfPresent(doc, attributes, "userQuery");
-        copyIfPresent(doc, attributes, "input");
-        copyIfPresent(doc, attributes, "output");
         copyIfPresent(doc, attributes, "inputToken");
         copyIfPresent(doc, attributes, "outputToken");
         copyIfPresent(doc, attributes, "contextChunks");

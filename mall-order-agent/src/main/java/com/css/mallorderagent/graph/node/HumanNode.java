@@ -8,6 +8,8 @@ import com.alibaba.cloud.ai.graph.action.InterruptionMetadata;
 import com.alibaba.cloud.ai.graph.action.NodeAction;
 import com.css.mallorderagent.graph.AgentGraphKeys;
 import com.css.mallorderagent.planner.HumanApprovalDetector;
+import com.example.mallordermilvusrag.tracing.RagTracingAdvisor;
+import com.example.mallorderobservability.trace.RagTraceScope;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -28,6 +30,7 @@ public class HumanNode implements NodeAction, InterruptableAction {
     private static final Logger log = LoggerFactory.getLogger(HumanNode.class);
 
     public static final String NODE_NAME = "human";
+    static final String REVIEW_TRACE_OPERATION = "human.review";
 
     /** 人工审核通过后路由到的敏感操作执行节点 */
     public static final String NEXT_SENSITIVE_OP = SensitiveOperationNode.NODE_NAME;
@@ -40,66 +43,115 @@ public class HumanNode implements NodeAction, InterruptableAction {
 
     @Override
     public Map<String, Object> apply(OverAllState state) {
-        Map<String, Object> feedback = readFeedback(state);
-        String nextNode = StateGraph.END;
-        Map<String, Object> updates = new HashMap<>();
+        Map<String, Object> startAttributes = traceAttributes(state);
+        RagTraceScope trace = RagTracingAdvisor.parentScope();
+        try (RagTraceScope humanSpan = trace.child(NODE_NAME, startAttributes)) {
+            try {
+                Map<String, Object> feedback = readFeedback(state);
+                humanSpan.attribute("feedbackPresent", !feedback.isEmpty());
+                String nextNode = StateGraph.END;
+                Map<String, Object> updates = new HashMap<>();
 
-        if (feedback.isEmpty()) {
-            updates.put(AgentGraphKeys.NEXT_NODE, NEXT_ANSWER);
-            log.info("HumanNode completed, autoApproved=true, nextNode={}", NEXT_ANSWER);
-            return updates;
-        }
+                if (feedback.isEmpty()) {
+                    updates.put(AgentGraphKeys.NEXT_NODE, NEXT_ANSWER);
+                    humanSpan.attribute("autoApproved", true);
+                    humanSpan.attribute("nextNode", NEXT_ANSWER);
+                    log.info("HumanNode completed, autoApproved=true, nextNode={}", NEXT_ANSWER);
+                    return updates;
+                }
 
-        boolean approved = Boolean.TRUE.equals(feedback.get("approved"));
-        if (approved) {
-            if (isDangerousOrderOp(state)) {
-                nextNode = NEXT_SENSITIVE_OP;
-            } else {
-                nextNode = NEXT_ANSWER;
+                boolean approved = Boolean.TRUE.equals(feedback.get("approved"));
+                boolean revisedQueryProvided = feedback.containsKey("revisedQuery");
+                if (approved) {
+                    if (isDangerousOrderOp(state)) {
+                        nextNode = NEXT_SENSITIVE_OP;
+                    } else {
+                        nextNode = NEXT_ANSWER;
+                    }
+                } else if (revisedQueryProvided) {
+                    nextNode = NEXT_PLANNER;
+                    updates.put(AgentGraphKeys.QUERY, String.valueOf(feedback.get("revisedQuery")));
+                } else if (isDangerousOrderOp(state)) {
+                    updates.put(AgentGraphKeys.ANSWER,
+                            HumanApprovalDetector.buildCancelMessage(state.value(AgentGraphKeys.QUERY, "")));
+                    nextNode = NEXT_ANSWER;
+                }
+
+                updates.put(AgentGraphKeys.NEXT_NODE, nextNode);
+                humanSpan.attribute("approved", approved);
+                humanSpan.attribute("revisedQueryProvided", revisedQueryProvided);
+                humanSpan.attribute("nextNode", nextNode);
+                log.info("HumanNode completed, approved={}, nextNode={}", approved, nextNode);
+                return updates;
+            } catch (RuntimeException e) {
+                humanSpan.error(e);
+                throw e;
             }
-        } else if (feedback.containsKey("revisedQuery")) {
-            nextNode = NEXT_PLANNER;
-            updates.put(AgentGraphKeys.QUERY, String.valueOf(feedback.get("revisedQuery")));
-        } else if (isDangerousOrderOp(state)) {
-            updates.put(AgentGraphKeys.ANSWER,
-                    HumanApprovalDetector.buildCancelMessage(state.value(AgentGraphKeys.QUERY, "")));
-            nextNode = NEXT_ANSWER;
         }
-
-        updates.put(AgentGraphKeys.NEXT_NODE, nextNode);
-        log.info("HumanNode completed, approved={}, nextNode={}", approved, nextNode);
-        return updates;
     }
 
     @Override
     public Optional<InterruptionMetadata> interrupt(String nodeId, OverAllState state, RunnableConfig config) {
-        if (!state.value(AgentGraphKeys.HUMAN_REVIEW_ENABLED, false)) {
-            return Optional.empty();
+        Map<String, Object> startAttributes = traceAttributes(state);
+        RagTraceScope trace = RagTracingAdvisor.parentScope();
+        try (RagTraceScope reviewSpan = trace.child(REVIEW_TRACE_OPERATION, startAttributes)) {
+            try {
+                if (!state.value(AgentGraphKeys.HUMAN_REVIEW_ENABLED, false)) {
+                    return noReview(reviewSpan, "review_disabled");
+                }
+                if (!readFeedback(state).isEmpty()) {
+                    return noReview(reviewSpan, "feedback_already_present");
+                }
+                String answer = state.value(AgentGraphKeys.ANSWER, "");
+                reviewSpan.attribute("answerLength", answer.length());
+                if (answer.isBlank()) {
+                    return noReview(reviewSpan, "answer_missing");
+                }
+                if (!shouldReview(state, answer)) {
+                    log.info("HumanNode skipped, no sensitive operation detected, queryLength={}",
+                            state.value(AgentGraphKeys.QUERY, "").length());
+                    return noReview(reviewSpan, "review_not_required");
+                }
+                String query = state.value(AgentGraphKeys.QUERY, "");
+                String operationLabel = HumanApprovalDetector.resolveOperationLabel(query);
+                String message = resolveReviewMessage(state, answer);
+                InterruptionMetadata interruption = InterruptionMetadata.builder(nodeId, state)
+                        .addMetadata("message", message)
+                        .addMetadata("answer", answer)
+                        .addMetadata("query", query)
+                        .addMetadata("planStrategy", state.value(AgentGraphKeys.PLAN_STRATEGY, ""))
+                        .addMetadata("operationLabel", operationLabel)
+                        .build();
+                reviewSpan.attribute("reviewRequired", true);
+                reviewSpan.attribute("decisionReason", "sensitive_operation");
+                reviewSpan.attribute("operationLabel", operationLabel);
+                log.info("HumanNode interrupted for sensitive operation, queryLength={}, answerLength={}",
+                        query.length(), answer.length());
+                return Optional.of(interruption);
+            } catch (RuntimeException e) {
+                reviewSpan.error(e);
+                throw e;
+            }
         }
-        if (state.value(AgentGraphKeys.HUMAN_FEEDBACK).isPresent()) {
-            return Optional.empty();
+    }
+
+    private static Optional<InterruptionMetadata> noReview(RagTraceScope reviewSpan, String reason) {
+        reviewSpan.attribute("reviewRequired", false);
+        reviewSpan.attribute("decisionReason", reason);
+        return Optional.empty();
+    }
+
+    private static Map<String, Object> traceAttributes(OverAllState state) {
+        Map<String, Object> attributes = new HashMap<>();
+        String conversationId = state.value(AgentGraphKeys.SESSION_ID, "");
+        if (!conversationId.isBlank()) {
+            attributes.put("conversationId", conversationId);
         }
-        String answer = state.value(AgentGraphKeys.ANSWER, "");
-        if (answer.isBlank()) {
-            return Optional.empty();
-        }
-        if (!shouldReview(state, answer)) {
-            log.info("HumanNode skipped, no sensitive operation detected, query='{}'",
-                    state.value(AgentGraphKeys.QUERY, ""));
-            return Optional.empty();
-        }
-        String message = resolveReviewMessage(state, answer);
-        InterruptionMetadata interruption = InterruptionMetadata.builder(nodeId, state)
-                .addMetadata("message", message)
-                .addMetadata("answer", answer)
-                .addMetadata("query", state.value(AgentGraphKeys.QUERY, ""))
-                .addMetadata("planStrategy", state.value(AgentGraphKeys.PLAN_STRATEGY, ""))
-                .addMetadata("operationLabel",
-                        HumanApprovalDetector.resolveOperationLabel(state.value(AgentGraphKeys.QUERY, "")))
-                .build();
-        log.info("HumanNode interrupted for sensitive operation, query='{}', answerLength={}",
-                state.value(AgentGraphKeys.QUERY, ""), answer.length());
-        return Optional.of(interruption);
+        attributes.put("planStrategy", state.value(AgentGraphKeys.PLAN_STRATEGY, ""));
+        attributes.put("dangerousOperation", isDangerousOrderOp(state));
+        attributes.put("humanReviewEnabled", state.value(AgentGraphKeys.HUMAN_REVIEW_ENABLED, false));
+        attributes.put("feedbackPresent", !readFeedback(state).isEmpty());
+        return attributes;
     }
 
     private static boolean isDangerousOrderOp(OverAllState state) {

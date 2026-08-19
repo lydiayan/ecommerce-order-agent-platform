@@ -8,11 +8,16 @@ import com.css.mallorderagent.planner.ActionDefinition;
 import com.css.mallorderagent.planner.ActionType;
 import com.css.mallorderagent.planner.PlanResult;
 import com.css.mallorderagent.planner.executor.ActionExecutorRegistry;
+import com.example.mallordermilvusrag.tracing.RagTracingAdvisor;
+import com.example.mallorderobservability.trace.RagTraceScope;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -36,39 +41,69 @@ public class ActionRunnerNode implements NodeAction {
 
     @Override
     public Map<String, Object> apply(OverAllState state) {
-        PlanResult plan = state.value(AgentGraphKeys.PLAN, PlanResult.class)
-                .orElseThrow(() -> new IllegalStateException("plan is required before ActionRunnerNode"));
-
-        if (plan.actions().isEmpty()) {
-            log.info("ActionRunnerNode skipped, strategy={}, no actions", plan.strategy());
-            return Map.of();
+        Map<String, Object> startAttributes = new LinkedHashMap<>();
+        String conversationId = state.value(AgentGraphKeys.SESSION_ID, "");
+        if (!conversationId.isBlank()) {
+            startAttributes.put("conversationId", conversationId);
         }
 
-        Map<String, Object> context = new HashMap<>(state.data());
-        Map<String, Object> accumulated = new HashMap<>();
+        RagTraceScope trace = RagTracingAdvisor.parentScope();
+        try (RagTraceScope actionRunnerSpan = trace.child(NODE_NAME, startAttributes)) {
+            try {
+                PlanResult plan = state.value(AgentGraphKeys.PLAN, PlanResult.class)
+                        .orElseThrow(() -> new IllegalStateException("plan is required before ActionRunnerNode"));
+                actionRunnerSpan.attribute("planStrategy", plan.strategy());
+                actionRunnerSpan.attribute("plannedActionCount", plan.actions().size());
 
-        for (ActionDefinition action : plan.actions()) {
-            if (action.type() == ActionType.LLM) {
-                log.debug("ActionRunnerNode skip LLM action={}, executor={}", action.action(), action.executor());
-                continue;
-            }
+                if (plan.actions().isEmpty()) {
+                    actionRunnerSpan.attribute("executedActionCount", 0);
+                    actionRunnerSpan.attribute("executedActions", List.of());
+                    actionRunnerSpan.attribute("skippedLlmActionCount", 0);
+                    actionRunnerSpan.attribute("shortCircuited", false);
+                    log.info("ActionRunnerNode skipped, strategy={}, no actions", plan.strategy());
+                    return Map.of();
+                }
 
-            OverAllState stepState = new OverAllState(context);
-            Map<String, Object> partial = actionExecutorRegistry.execute(action.executor(), stepState);
-            if (partial != null && !partial.isEmpty()) {
-                accumulated.putAll(partial);
-                context = OverAllState.updateState(context, partial);
-            }
-            log.info("ActionRunnerNode executed action={}, type={}, executor={}",
-                    action.action(), action.type(), action.executor());
+                Map<String, Object> context = new HashMap<>(state.data());
+                Map<String, Object> accumulated = new HashMap<>();
+                List<String> executedActions = new ArrayList<>();
+                int skippedLlmActionCount = 0;
+                boolean shortCircuited = false;
 
-            if (shouldStopAfterAction(action, partial)) {
-                log.info("ActionRunnerNode short-circuited after action={}", action.action());
-                break;
+                for (ActionDefinition action : plan.actions()) {
+                    if (action.type() == ActionType.LLM) {
+                        skippedLlmActionCount++;
+                        log.debug("ActionRunnerNode skip LLM action={}, executor={}", action.action(), action.executor());
+                        continue;
+                    }
+
+                    OverAllState stepState = new OverAllState(context);
+                    Map<String, Object> partial = actionExecutorRegistry.execute(action.executor(), stepState);
+                    executedActions.add(action.action());
+                    if (partial != null && !partial.isEmpty()) {
+                        accumulated.putAll(partial);
+                        context = OverAllState.updateState(context, partial);
+                    }
+                    log.info("ActionRunnerNode executed action={}, type={}, executor={}",
+                            action.action(), action.type(), action.executor());
+
+                    if (shouldStopAfterAction(action, partial)) {
+                        shortCircuited = true;
+                        log.info("ActionRunnerNode short-circuited after action={}", action.action());
+                        break;
+                    }
+                }
+
+                actionRunnerSpan.attribute("executedActionCount", executedActions.size());
+                actionRunnerSpan.attribute("executedActions", executedActions);
+                actionRunnerSpan.attribute("skippedLlmActionCount", skippedLlmActionCount);
+                actionRunnerSpan.attribute("shortCircuited", shortCircuited);
+                return accumulated;
+            } catch (RuntimeException e) {
+                actionRunnerSpan.error(e);
+                throw e;
             }
         }
-
-        return accumulated;
     }
 
     /** RAG 无命中时已写入 answer，无需继续执行后续动作 */

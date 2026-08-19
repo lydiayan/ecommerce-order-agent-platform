@@ -9,28 +9,31 @@ import java.util.List;
 @Mapper
 public interface OrderMapper {
 
-    @Select("SELECT * FROM orders limit 10")
-    List<Order> selectAllOrders();
-
     @Select("SELECT * FROM orders WHERE order_id = #{orderId}")
     Order selectOrderById(@Param("orderId") String orderId);
 
-    @Select("SELECT * FROM order_details WHERE order_id = #{orderId}")
+    @Select("SELECT * FROM orders WHERE order_id = #{orderId} AND user_id = #{userId}")
+    Order selectOwnedOrder(@Param("orderId") String orderId, @Param("userId") String userId);
+
+    @Select("""
+            SELECT detail_id AS detailId,
+                   order_id AS orderId,
+                   product_id AS productId,
+                   product_name AS productName,
+                   product_type AS productType,
+                   quantity,
+                   unit_price AS unitPrice,
+                   total_price AS totalPrice,
+                   specification
+            FROM order_details
+            WHERE order_id = #{orderId}
+            """)
     List<OrderDetail> selectOrderDetailsByOrderId(@Param("orderId") String orderId);
 
     @Select("SELECT * FROM orders WHERE user_id = #{userId} ORDER BY order_time DESC")
     List<Order> selectOrdersByUserId(@Param("userId") String userId);
 
-    @Update("UPDATE orders SET order_status = 4 WHERE order_id = #{orderId}")
-    int cancelOrder(@Param("orderId") String orderId);
-
-    @Insert("INSERT INTO orders (order_id, user_id, product_id, quantity, total_price, order_status) " +
-            "VALUES (#{orderId}, #{userId}, #{productId}, #{quantity}, #{totalPrice}, #{status})")
-    int insertOrder(Order order);
-
-    @Insert("INSERT INTO order_details (order_id, product_id, product_name, quantity, unit_price, total_price) " +
-            "VALUES (#{orderId}, #{productId}, #{productName}, #{quantity}, #{unitPrice}, #{totalPrice})")
-    int insertOrderDetail(OrderDetail orderDetail);
-
-
+    @Update("UPDATE orders SET order_status = 4 " +
+            "WHERE order_id = #{orderId} AND user_id = #{userId} AND order_status IN (0, 1)")
+    int cancelOrder(@Param("orderId") String orderId, @Param("userId") String userId);
 }

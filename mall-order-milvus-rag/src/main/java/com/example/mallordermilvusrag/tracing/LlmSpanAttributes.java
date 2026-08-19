@@ -20,11 +20,11 @@ public final class LlmSpanAttributes {
     /**
      * llm 单条 SPAN_END 使用的轻量起始属性。
      */
-    static Map<String, Object> buildStartAttributes(String userQuery,
-                                                    Integer contextChunks,
-                                                    String model,
-                                                    Double temperature,
-                                                    String input) {
+    public static Map<String, Object> buildStartAttributes(Integer queryLength,
+                                                           Integer contextChunks,
+                                                           String model,
+                                                           Double temperature,
+                                                           Integer inputLength) {
         Map<String, Object> attrs = new LinkedHashMap<>();
         if (model != null && !model.isBlank()) {
             attrs.put("model", model);
@@ -32,21 +32,19 @@ public final class LlmSpanAttributes {
         if (temperature != null) {
             attrs.put("temperature", temperature);
         }
-        putText(attrs, "userQuery", userQuery);
-        putText(attrs, "input", input);
+        if (queryLength != null) {
+            attrs.put("queryLength", queryLength);
+        }
+        if (inputLength != null) {
+            attrs.put("inputLength", inputLength);
+        }
         if (contextChunks != null) {
             attrs.put("contextChunks", contextChunks);
         }
         return attrs;
     }
 
-    private static void putText(Map<String, Object> attrs, String key, String value) {
-        if (value != null && !value.isBlank()) {
-            attrs.put(key, PromptTraceAttributes.truncate(value));
-        }
-    }
-
-    static Map<String, Object> fromChatResponse(ChatResponse chatResponse) {
+    public static Map<String, Object> fromChatResponse(ChatResponse chatResponse) {
         Map<String, Object> attrs = new LinkedHashMap<>();
         if (chatResponse == null) {
             return attrs;
@@ -71,6 +69,12 @@ public final class LlmSpanAttributes {
                 String finishReason = generationMetadata.getFinishReason();
                 if (finishReason != null && !finishReason.isBlank()) {
                     attrs.put("finishReason", finishReason);
+                }
+            }
+            if (generation.getOutput() != null) {
+                String output = generation.getOutput().getText();
+                if (output != null) {
+                    attrs.put("outputLength", output.length());
                 }
             }
         }

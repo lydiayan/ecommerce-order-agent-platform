@@ -1,5 +1,7 @@
 package com.example.mallordermilvusrag.dto;
 
+import java.util.List;
+
 /**
  * 向量搜索请求 DTO
  */
@@ -30,6 +32,12 @@ public class SearchRequest {
 
     /** 按角色过滤，如 "客服" */
     private String roleFilter;
+
+    /** 服务端派生的多角色访问范围。 */
+    private List<String> roleFilters;
+
+    /** 服务端派生的多部门访问范围。 */
+    private List<String> departmentFilters;
 
     /** 按版本过滤，如 "1.0" */
     private String versionFilter;
@@ -104,6 +112,22 @@ public class SearchRequest {
 
     public void setRoleFilter(String roleFilter) {
         this.roleFilter = roleFilter;
+    }
+
+    public List<String> getRoleFilters() {
+        return roleFilters;
+    }
+
+    public void setRoleFilters(List<String> roleFilters) {
+        this.roleFilters = roleFilters;
+    }
+
+    public List<String> getDepartmentFilters() {
+        return departmentFilters;
+    }
+
+    public void setDepartmentFilters(List<String> departmentFilters) {
+        this.departmentFilters = departmentFilters;
     }
 
     public String getVersionFilter() {

@@ -20,6 +20,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.annotation.Primary;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceClientConfiguration;
@@ -53,6 +55,7 @@ public class MemoryAutoConfig {
     }
 
     @Bean(name = "memoryRedisConnectionFactory")
+    @Primary
     @ConditionalOnMissingBean(name = "memoryRedisConnectionFactory")
     public RedisConnectionFactory memoryRedisConnectionFactory() {
         MemoryProperties.ShortTermProperties.RedisProperties redis = properties.getShortTerm().getRedis();
@@ -66,13 +69,15 @@ public class MemoryAutoConfig {
 
     @Bean(name = "memoryRedisTemplate")
     @ConditionalOnMissingBean(name = "memoryRedisTemplate")
-    public StringRedisTemplate memoryRedisTemplate(RedisConnectionFactory memoryRedisConnectionFactory) {
+    public StringRedisTemplate memoryRedisTemplate(
+            @Qualifier("memoryRedisConnectionFactory") RedisConnectionFactory memoryRedisConnectionFactory) {
         return new StringRedisTemplate(memoryRedisConnectionFactory);
     }
 
     @Bean
     @ConditionalOnMissingBean
-    public RedisShortTermMemoryStore redisShortTermMemoryStore(StringRedisTemplate memoryRedisTemplate,
+    public RedisShortTermMemoryStore redisShortTermMemoryStore(
+                                                               @Qualifier("memoryRedisTemplate") StringRedisTemplate memoryRedisTemplate,
                                                                ObjectMapper objectMapper) {
         MemoryProperties.ShortTermProperties shortTerm = properties.getShortTerm();
         log.info("Creating RedisShortTermMemoryStore, keyPrefix={}, ttlSeconds={}, maxSize={}",

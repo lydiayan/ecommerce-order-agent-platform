@@ -99,7 +99,7 @@ public class MemoryConsolidationService {
         List<ShortTermMessage> delta = hybridMemoryManager.getShortTerm()
                 .listMessagesAfter(userId, sessionId, getLastMessageId(userId, sessionId));
         if (delta.isEmpty()) {
-            log.info("No new messages to consolidate for session={}:{}", userId, sessionId);
+            log.info("No new messages to consolidate for current session");
             resetPendingIfNeeded(userId, sessionId);
             return 0;
         }
@@ -107,7 +107,7 @@ public class MemoryConsolidationService {
         String conversationText = hybridMemoryManager.getShortTerm().formatConversationText(delta);
         List<ExtractedMemory> extracted = memoryExtractor.extract(conversationText);
         if (extracted.isEmpty()) {
-            log.info("No structured memories extracted for session={}:{}", userId, sessionId);
+            log.info("No structured memories extracted for current session");
         }
 
         List<String> profileHints = new ArrayList<>();
@@ -187,4 +187,3 @@ public class MemoryConsolidationService {
         }
     }
 }
-

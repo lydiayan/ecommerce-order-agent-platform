@@ -5,28 +5,43 @@ import com.example.mallorderobservability.trace.RagTraceService;
 import com.example.mallorderobservability.trace.RocketMqTracePublisher;
 import com.example.mallorderobservability.trace.TracePublisher;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.rocketmq.spring.autoconfigure.RocketMQAutoConfiguration;
 import org.apache.rocketmq.spring.core.RocketMQTemplate;
-import org.springframework.beans.factory.ObjectProvider;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.AutoConfigureAfter;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 
 @AutoConfiguration
+@AutoConfigureAfter(RocketMQAutoConfiguration.class)
 @EnableConfigurationProperties(ObservabilityProperties.class)
 @ConditionalOnProperty(prefix = "observability", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class ObservabilityProducerAutoConfig {
 
+    private static final Logger log = LoggerFactory.getLogger(ObservabilityProducerAutoConfig.class);
+
     @Bean
-    @ConditionalOnMissingBean
-    public TracePublisher tracePublisher(ObservabilityProperties properties,
-                                         ObjectMapper objectMapper,
-                                         ObjectProvider<RocketMQTemplate> rocketMQTemplateProvider) {
-        RocketMQTemplate rocketMQTemplate = rocketMQTemplateProvider.getIfAvailable();
-        if (properties.getProducer().isEnabled() && rocketMQTemplate != null) {
-            return new RocketMqTracePublisher(rocketMQTemplate, properties, objectMapper);
-        }
+    @ConditionalOnMissingBean(TracePublisher.class)
+    @ConditionalOnBean(RocketMQTemplate.class)
+    @ConditionalOnProperty(prefix = "observability.producer", name = "enabled", havingValue = "true")
+    public TracePublisher rocketMqTracePublisher(RocketMQTemplate rocketMQTemplate,
+                                                 ObservabilityProperties properties,
+                                                 ObjectMapper objectMapper) {
+        log.info("TracePublisher using RocketMQ -> topic={}:{}",
+                properties.getTrace().getTopic(), properties.getTrace().getTag());
+        return new RocketMqTracePublisher(rocketMQTemplate, properties, objectMapper);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(TracePublisher.class)
+    public TracePublisher loggingTracePublisher() {
+        log.warn("TracePublisher falling back to LoggingTracePublisher "
+                + "(set observability.producer.enabled=true and ensure RocketMQTemplate is available)");
         return new LoggingTracePublisher();
     }
 

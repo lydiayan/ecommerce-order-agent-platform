@@ -9,7 +9,7 @@ import org.springframework.test.context.TestPropertySource;
         "memory.user-profile.enabled=false",
         "spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration"
 })
-class MallOrderAgentApplicationTests {
+class MallOrderAgentContextLiveIT {
 
 	@Test
 	void contextLoads() {

@@ -1,39 +1,26 @@
 
 server:
-  port: 8081
+  address: ${SERVER_ADDRESS:127.0.0.1}
+  port: ${SERVER_PORT:8081}
 spring:
   application:
     name: mall-order
-#  config:
-#    import: optional:nacos:${spring.application.name}.yml
   datasource:
-    url: jdbc:mysql://localhost:3306/products?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
-    username: root
-    password: root
+    url: ${MALL_ORDER_DATASOURCE_URL:jdbc:mysql://127.0.0.1:13306/products?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
+    username: ${MYSQL_USER:portfolio}
+    password: ${MYSQL_PASSWORD:portfolio}
     driver-class-name: com.mysql.cj.jdbc.Driver
-#  cloud:
-#    nacos:
-#      discovery:
-#        server-addr: localhost:8848
-#        namespace: public
-#        group: DEFAULT_GROUP
-#        enabled: true
-#        username: nacos  # 添加账号
-#        password: nacos  # 添加密码
-#      config:
-#        server-addr: localhost:8848
-#        namespace: public
-#        group: DEFAULT_GROUP
-#        file-extension: yaml
-#        enabled: true
-#        username: nacos  # 添加账号
-#        password: nacos  # 添加密码
-#        shared-configs:
-#          - data-id: common-config.yaml
-#            group: DEFAULT_GROUP
-#            refresh: true
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    baseline-version: 1
+    locations: classpath:db/migration
+    validate-on-migrate: true
 mybatis:
   configuration:
     map-underscore-to-camel-case: true
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
-  type-aliases-package: com.mall.order.entity
+  type-aliases-package: com.example.mallorder.entity
+
+service:
+  auth:
+    token: ${MALL_ORDER_SERVICE_TOKEN:local-order-service-token-change-me}

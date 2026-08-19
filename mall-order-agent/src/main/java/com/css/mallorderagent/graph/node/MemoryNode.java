@@ -9,6 +9,9 @@ import com.css.mallorderagent.planner.executor.ActionExecutor;
 import com.example.mallordermemory.memory.HybridMemoryManager;
 import com.example.mallordermemory.memory.MemoryEntry;
 import com.example.mallordermemory.service.UserProfileService;
+import com.example.mallordermilvusrag.tracing.RagTracingAdvisor;
+import com.example.mallorderobservability.trace.RagTraceScope;
+import com.example.mallorderobservability.trace.TracePrivacy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.Message;
@@ -16,6 +19,7 @@ import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -51,24 +55,44 @@ public class MemoryNode implements NodeAction, ActionExecutor {
         String userId = AgentGraphSupport.resolveUserId(state, hybridMemoryManager.getDefaultUserId());
         String sessionId = AgentGraphSupport.resolveSessionId(state);
 
-        List<ConversationTurn> history = loadHistory(userId, sessionId);
-        String userProfileContext = loadUserProfileContext(userId);
-        LongTermMemory longTermMemory = loadLongTermMemory(query);
-        int memoryCount = longTermMemory.count() + (userProfileContext.isBlank() ? 0 : 1);
+        Map<String, Object> startAttributes = new LinkedHashMap<>();
+        startAttributes.put("conversationId", sessionId);
+        startAttributes.put("userFingerprint", TracePrivacy.fingerprint(userId));
+        startAttributes.put("queryLength", query.length());
 
-        log.info("MemoryNode completed, userId={}, sessionId={}, history={}, longTerm={}, profile={}",
-                userId, sessionId, history.size(), longTermMemory.count(), !userProfileContext.isBlank());
+        RagTraceScope trace = RagTracingAdvisor.parentScope();
+        try (RagTraceScope memorySpan = trace.child(NODE_NAME, startAttributes)) {
+            try {
+                List<ConversationTurn> history = loadHistory(userId, sessionId);
+                String userProfileContext = loadUserProfileContext(userId);
+                LongTermMemory longTermMemory = loadLongTermMemory(userId, query);
+                boolean profileLoaded = !userProfileContext.isBlank();
+                int memoryCount = longTermMemory.count() + (profileLoaded ? 1 : 0);
 
-        Map<String, Object> updates = new HashMap<>();
-        updates.put(AgentGraphKeys.USER_ID, userId);
-        updates.put(AgentGraphKeys.SESSION_ID, sessionId);
-        updates.put(AgentGraphKeys.QUERY, query);
-        updates.put(AgentGraphKeys.HISTORY, history);
-        updates.put(AgentGraphKeys.HISTORY_COUNT, history.size());
-        updates.put(AgentGraphKeys.USER_PROFILE_CONTEXT, userProfileContext);
-        updates.put(AgentGraphKeys.LONG_TERM_MEMORY, longTermMemory.context());
-        updates.put(AgentGraphKeys.MEMORY_COUNT, memoryCount);
-        return updates;
+                memorySpan.attribute("historyCount", history.size());
+                memorySpan.attribute("longTermMemoryCount", longTermMemory.count());
+                memorySpan.attribute("longTermMemoryRetrievalSucceeded", longTermMemory.retrievalSucceeded());
+                memorySpan.attribute("profileLoaded", profileLoaded);
+                memorySpan.attribute("memoryCount", memoryCount);
+
+                log.info("MemoryNode completed, history={}, longTerm={}, profile={}",
+                        history.size(), longTermMemory.count(), profileLoaded);
+
+                Map<String, Object> updates = new HashMap<>();
+                updates.put(AgentGraphKeys.USER_ID, userId);
+                updates.put(AgentGraphKeys.SESSION_ID, sessionId);
+                updates.put(AgentGraphKeys.QUERY, query);
+                updates.put(AgentGraphKeys.HISTORY, history);
+                updates.put(AgentGraphKeys.HISTORY_COUNT, history.size());
+                updates.put(AgentGraphKeys.USER_PROFILE_CONTEXT, userProfileContext);
+                updates.put(AgentGraphKeys.LONG_TERM_MEMORY, longTermMemory.context());
+                updates.put(AgentGraphKeys.MEMORY_COUNT, memoryCount);
+                return updates;
+            } catch (RuntimeException e) {
+                memorySpan.error(e);
+                throw e;
+            }
+        }
     }
 
     @Override
@@ -85,22 +109,24 @@ public class MemoryNode implements NodeAction, ActionExecutor {
         return userProfileService.map(service -> service.formatForPrompt(userId)).orElse("");
     }
 
-    private LongTermMemory loadLongTermMemory(String query) {
+    private LongTermMemory loadLongTermMemory(String userId, String query) {
         try {
             float[] queryEmbedding = embeddingModel.embed(query);
-            List<MemoryEntry> entries = hybridMemoryManager.searchLongTerm(queryEmbedding, LONG_TERM_MEMORY_TOP_K);
+            List<MemoryEntry> entries = hybridMemoryManager.searchLongTerm(
+                    userId, queryEmbedding, LONG_TERM_MEMORY_TOP_K);
             return new LongTermMemory(
                     entries.size(),
-                    hybridMemoryManager.formatLongTermContext(entries));
+                    hybridMemoryManager.formatLongTermContext(entries),
+                    true);
         } catch (Exception e) {
             log.debug("Skip long-term memory retrieval: {}", e.getMessage());
             return LongTermMemory.empty();
         }
     }
 
-    private record LongTermMemory(int count, String context) {
+    private record LongTermMemory(int count, String context, boolean retrievalSucceeded) {
         private static LongTermMemory empty() {
-            return new LongTermMemory(0, "");
+            return new LongTermMemory(0, "", false);
         }
     }
 }

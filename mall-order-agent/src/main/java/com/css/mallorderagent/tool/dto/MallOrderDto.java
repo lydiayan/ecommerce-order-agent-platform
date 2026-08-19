@@ -2,6 +2,7 @@ package com.css.mallorderagent.tool.dto;
 
 import java.math.BigDecimal;
 import java.util.Date;
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -14,6 +15,14 @@ public class MallOrderDto {
     private Date orderTime;
     private BigDecimal totalAmount;
     private Integer orderStatus;
+    private Integer deliveryStatus;
+    private LocalDateTime shippedAt;
+    private LocalDateTime signedAt;
+    private Integer productionStatus;
+    private LocalDateTime productionStartedAt;
+    private Integer digitalDeliveryStatus;
+    private LocalDateTime digitalDeliveredAt;
+    private LocalDateTime redeemedAt;
     private String paymentMethod;
     private String shippingAddress;
     private String contactPhone;
@@ -58,6 +67,38 @@ public class MallOrderDto {
     public void setOrderStatus(Integer orderStatus) {
         this.orderStatus = orderStatus;
     }
+
+    public Integer getDeliveryStatus() { return deliveryStatus; }
+
+    public void setDeliveryStatus(Integer deliveryStatus) { this.deliveryStatus = deliveryStatus; }
+
+    public LocalDateTime getShippedAt() { return shippedAt; }
+
+    public void setShippedAt(LocalDateTime shippedAt) { this.shippedAt = shippedAt; }
+
+    public LocalDateTime getSignedAt() { return signedAt; }
+
+    public void setSignedAt(LocalDateTime signedAt) { this.signedAt = signedAt; }
+
+    public Integer getProductionStatus() { return productionStatus; }
+
+    public void setProductionStatus(Integer productionStatus) { this.productionStatus = productionStatus; }
+
+    public LocalDateTime getProductionStartedAt() { return productionStartedAt; }
+
+    public void setProductionStartedAt(LocalDateTime productionStartedAt) { this.productionStartedAt = productionStartedAt; }
+
+    public Integer getDigitalDeliveryStatus() { return digitalDeliveryStatus; }
+
+    public void setDigitalDeliveryStatus(Integer digitalDeliveryStatus) { this.digitalDeliveryStatus = digitalDeliveryStatus; }
+
+    public LocalDateTime getDigitalDeliveredAt() { return digitalDeliveredAt; }
+
+    public void setDigitalDeliveredAt(LocalDateTime digitalDeliveredAt) { this.digitalDeliveredAt = digitalDeliveredAt; }
+
+    public LocalDateTime getRedeemedAt() { return redeemedAt; }
+
+    public void setRedeemedAt(LocalDateTime redeemedAt) { this.redeemedAt = redeemedAt; }
 
     public String getPaymentMethod() {
         return paymentMethod;

@@ -45,6 +45,10 @@ public class PromptNode implements NodeAction {
         String query = AgentGraphSupport.resolveQuery(state);
         List<ConversationTurn> history = AgentGraphSupport.readHistory(state);
         String userProfileContext = state.value(AgentGraphKeys.USER_PROFILE_CONTEXT, "");
+        String personaContext = state.value(AgentGraphKeys.PERSONA_CONTEXT, "");
+        if (!personaContext.isBlank()) {
+            userProfileContext = personaContext + (userProfileContext.isBlank() ? "" : "\n\n" + userProfileContext);
+        }
         String longTermMemory = state.value(AgentGraphKeys.LONG_TERM_MEMORY, "");
         String context = state.value(AgentGraphKeys.CONTEXT, "");
         String toolResult = state.value(AgentGraphKeys.TOOL_RESULT, "");

@@ -48,7 +48,7 @@ public class RagTraceService {
 
         TraceEvent traceStart = TraceEvent.create(
                 TraceEventType.TRACE_START, traceId, spanId, null, operation, properties.getServiceName());
-        //traceStart.getAttributes().putAll(safeAttributes(attributes));
+        traceStart.getAttributes().putAll(safeAttributes(attributes));
         tracePublisher.publish(traceStart);
 
         TraceEvent spanStart = TraceEvent.create(
@@ -58,7 +58,7 @@ public class RagTraceService {
 
         SpanContext context = new SpanContext(traceId, spanId, null, System.currentTimeMillis(), true);
         stack.push(context);
-        return new RagTraceScope(this, context, operation, Map.of());
+        return new RagTraceScope(this, context, operation, safeAttributes(attributes));
     }
 
     public RagTraceScope childSpan(String operation, Map<String, Object> attributes) {
@@ -154,7 +154,7 @@ public class RagTraceService {
     }
 
     private static Map<String, Object> safeAttributes(Map<String, Object> attributes) {
-        return attributes != null ? new LinkedHashMap<>(attributes) : new LinkedHashMap<>();
+        return TracePrivacy.sanitizeAttributes(attributes);
     }
 
     record SpanContext(String traceId, String spanId, String parentSpanId, long startMs, boolean root) {

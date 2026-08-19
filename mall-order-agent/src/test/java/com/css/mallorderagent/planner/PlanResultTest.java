@@ -23,4 +23,15 @@ class PlanResultTest {
         assertTrue(plan.hasType(ActionType.TOOL));
         assertTrue(plan.hasAction(ActionDefinitions.ORDER_QUERY));
     }
+
+    @Test
+    void orderPolicyQueryPipelineUsesAuthoritativeEligibilityTool() {
+        PlanResult plan = new PlanResult("ORDER_POLICY_QUERY", ActionDefinitions.orderPolicyQueryPipeline());
+
+        assertFalse(plan.needRag());
+        assertTrue(plan.needLlm());
+        assertTrue(plan.hasAction(ActionDefinitions.REFUND_ELIGIBILITY));
+        assertFalse(plan.hasAction(ActionDefinitions.ORDER_QUERY));
+        assertFalse(plan.hasAction(ActionDefinitions.KNOWLEDGE_SEARCH));
+    }
 }

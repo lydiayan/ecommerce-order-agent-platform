@@ -1,0 +1,114 @@
+[
+  {
+    "name": "order_query_my_orders",
+    "description": "查询我的订单（ORDER_QUERY）",
+    "expectPlanStrategy": "ORDER_QUERY",
+    "request": {
+      "query": "查询我的订单",
+      "userId": "USER1001",
+      "conversationId": "test-ask-batch-01",
+      "topK": 5
+    }
+  },
+  {
+    "name": "order_query_by_order_id",
+    "description": "按订单号查询（ORDER_QUERY）",
+    "expectPlanStrategy": "ORDER_QUERY",
+    "request": {
+      "query": "查询订单 ORD20260810001",
+      "userId": "USER1001",
+      "conversationId": "test-ask-batch-02",
+      "topK": 5
+    }
+  },
+  {
+    "name": "order_query_status",
+    "description": "查订单状态（ORDER_QUERY）",
+    "expectPlanStrategy": "ORDER_QUERY",
+    "request": {
+      "query": "查一下订单号 ORD20260810001 的状态",
+      "userId": "USER1001",
+      "conversationId": "test-ask-batch-03",
+      "topK": 5
+    }
+  },
+  {
+    "name": "rag_refund_policy",
+    "description": "退款规则问答（RAG_QA）",
+    "expectPlanStrategy": "RAG_QA",
+    "request": {
+      "query": "退款规则是什么",
+      "userId": "USER1001",
+      "conversationId": "test-ask-batch-04",
+      "topK": 5
+    }
+  },
+  {
+    "name": "rag_logistics_sla",
+    "description": "物流配送时效（RAG_QA）",
+    "expectPlanStrategy": "RAG_QA",
+    "request": {
+      "query": "物流配送时效是多久",
+      "userId": "USER1001",
+      "conversationId": "test-ask-batch-05",
+      "topK": 5
+    }
+  },
+  {
+    "name": "rag_return_process",
+    "description": "退货流程说明（RAG_QA）",
+    "expectPlanStrategy": "RAG_QA",
+    "request": {
+      "query": "退货流程是怎么走的",
+      "userId": "USER1001",
+      "conversationId": "test-ask-batch-06",
+      "topK": 5
+    }
+  },
+  {
+    "name": "rag_shipping_policy",
+    "description": "发货时效说明（RAG_QA）",
+    "expectPlanStrategy": "RAG_QA",
+    "request": {
+      "query": "下单后多久发货",
+      "userId": "USER1001",
+      "conversationId": "test-ask-batch-07",
+      "topK": 5
+    }
+  },
+  {
+    "name": "rag_after_sales",
+    "description": "售后政策问答（RAG_QA）",
+    "expectPlanStrategy": "RAG_QA",
+    "request": {
+      "query": "售后补偿规则有哪些",
+      "userId": "USER1001",
+      "conversationId": "test-ask-batch-08",
+      "topK": 5
+    }
+  },
+  {
+    "name": "dangerous_refund",
+    "description": "申请退款敏感操作（DANGEROUS_ORDER_OP）",
+    "expectPlanStrategy": "DANGEROUS_ORDER_OP",
+    "expectInterrupted": true,
+    "request": {
+      "query": "帮我退款 ORD20260810001",
+      "userId": "USER1001",
+      "conversationId": "test-ask-batch-09",
+      "topK": 5
+    }
+  },
+  {
+    "name": "dangerous_return",
+    "description": "申请退货敏感操作（DANGEROUS_ORDER_OP）",
+    "expectPlanStrategy": "DANGEROUS_ORDER_OP",
+    "expectInterrupted": true,
+    "request": {
+      "query": "我要退货 ORD20260810001",
+      "userId": "USER1001",
+      "conversationId": "test-ask-batch-10",
+      "topK": 5
+    }
+  }
+]

@@ -63,6 +63,21 @@ public final class AgentGraphSupport {
         return state.value(AgentGraphKeys.HISTORY, List.class).orElse(List.of());
     }
 
+    @SuppressWarnings("unchecked")
+    public static List<String> readStringList(OverAllState state, String key) {
+        return state.value(key, List.class).orElse(List.of()).stream()
+                .map(String::valueOf)
+                .toList();
+    }
+
+    public static boolean hasCapability(OverAllState state, String capability) {
+        return readStringList(state, AgentGraphKeys.CAPABILITIES).contains(capability);
+    }
+
+    public static boolean hasCapabilityContext(OverAllState state) {
+        return state.data().containsKey(AgentGraphKeys.CAPABILITIES);
+    }
+
     public static List<ConversationTurn> toConversationTurns(List<Message> messages) {
         List<ConversationTurn> turns = new ArrayList<>();
         String pendingUser = null;
@@ -104,6 +119,22 @@ public final class AgentGraphSupport {
         searchRequest.setRerankTopN(request.getRerankTopN());
         searchRequest.setRecallTopK(request.getRecallTopK());
         searchRequest.setRerankMinScore(request.getRerankMinScore());
+        return searchRequest;
+    }
+
+    @SuppressWarnings("unchecked")
+    public static SearchRequest toSearchRequest(AskRequest request,
+                                                RagDocumentProperties.AskProperties askProperties,
+                                                OverAllState state) {
+        SearchRequest searchRequest = toSearchRequest(request, askProperties);
+        List<String> roles = state.value(AgentGraphKeys.RAG_ROLE_SCOPES, List.class).orElse(null);
+        List<String> departments = state.value(AgentGraphKeys.RAG_DEPARTMENT_SCOPES, List.class).orElse(null);
+        if (roles != null || departments != null) {
+            searchRequest.setRoleFilter(null);
+            searchRequest.setDepartmentFilter(null);
+            searchRequest.setRoleFilters(roles != null ? roles : List.of());
+            searchRequest.setDepartmentFilters(departments != null ? departments : List.of());
+        }
         return searchRequest;
     }
 }

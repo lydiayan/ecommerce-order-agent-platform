@@ -205,7 +205,7 @@ public class LongTermMemoryManager {
         ensureInitialized();
         MemoryType type = entry.getType();
         if (type == MemoryType.USER_PROFILE) {
-            log.warn("USER_PROFILE is stored in MySQL, skip Milvus store for userId={}", entry.getUserId());
+            log.warn("USER_PROFILE is stored in MySQL; skipping Milvus store");
             return false;
         }
         if (!isReady(type)) {
@@ -339,6 +339,10 @@ public class LongTermMemoryManager {
      * @return 匹配的记忆条目列表
      */
     public List<MemoryEntry> search(MemoryType type, float[] queryEmbedding, int topK) {
+        return search(type, null, queryEmbedding, topK);
+    }
+
+    public List<MemoryEntry> search(MemoryType type, String userId, float[] queryEmbedding, int topK) {
         if (queryEmbedding == null || queryEmbedding.length == 0) {
             return List.of();
         }
@@ -349,12 +353,12 @@ public class LongTermMemoryManager {
             if (type == MemoryType.USER_PROFILE) {
                 return List.of();
             }
-            return searchCollection(type, queryEmbedding, topK);
+            return searchCollection(type, userId, queryEmbedding, topK);
         }
 
         int perTypeTopK = Math.max(1, topK / STORED_MEMORY_TYPES.length);
         for (MemoryType t : STORED_MEMORY_TYPES) {
-            results.addAll(searchCollection(t, queryEmbedding, perTypeTopK));
+            results.addAll(searchCollection(t, userId, queryEmbedding, perTypeTopK));
         }
 
         // 按 score 排序
@@ -366,7 +370,8 @@ public class LongTermMemoryManager {
     }
 
     @SuppressWarnings("unchecked")
-    private List<MemoryEntry> searchCollection(MemoryType type, float[] queryEmbedding, int topK) {
+    private List<MemoryEntry> searchCollection(MemoryType type, String userId,
+                                               float[] queryEmbedding, int topK) {
         if (!isReady(type) || topK <= 0) {
             return List.of();
         }
@@ -376,7 +381,7 @@ public class LongTermMemoryManager {
         List<String> searchOutputFields = List.of("id", "user_id", "conversation_id", "content",
                 "importance", "created_at", "metadata");
 
-        SearchParam searchParam = SearchParam.newBuilder()
+        SearchParam.Builder searchBuilder = SearchParam.newBuilder()
                 .withCollectionName(collectionName)
                 .withMetricType(MetricType.COSINE)
                 .withTopK(topK)
@@ -384,8 +389,11 @@ public class LongTermMemoryManager {
                 .withVectorFieldName("embedding")
                 .withParams("{\"nprobe\":16}")
                 .withOutFields(searchOutputFields)
-                .withConsistencyLevel(ConsistencyLevelEnum.EVENTUALLY)
-                .build();
+                .withConsistencyLevel(ConsistencyLevelEnum.EVENTUALLY);
+        if (userId != null && !userId.isBlank()) {
+            searchBuilder.withExpr("user_id == \"" + escapeExprString(userId.trim()) + "\"");
+        }
+        SearchParam searchParam = searchBuilder.build();
 
         R<SearchResults> searchResult = milvusClient.search(searchParam);
         if (searchResult.getStatus() != R.Status.Success.getCode()) {
@@ -445,7 +453,7 @@ public class LongTermMemoryManager {
         // NOTE: 简单的 Milvus query 需要构建布尔表达式
         // 目前返回空（Milvus 标量过滤需要 expression 查询）
         // 生产环境中可添加 Query 查询
-        log.debug("findByUser called for type={}, userId={} (scalar filtering TBD)", type, userId);
+        log.debug("findByUser called for type={} (scalar filtering TBD)", type);
         return List.of();
     }
 
@@ -507,6 +515,29 @@ public class LongTermMemoryManager {
             log.warn("Delete failed on {}: {}", collectionName, deleteResult.getMessage());
         } else {
             log.info("Deleted {} entries from {}", ids.size(), collectionName);
+        }
+    }
+
+    public void deleteByUsers(List<String> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return;
+        }
+        String expression = "user_id in " + userIds.stream()
+                .filter(id -> id != null && !id.isBlank())
+                .map(id -> "\"" + escapeExprString(id.trim()) + "\"")
+                .collect(Collectors.joining(", ", "[", "]"));
+        for (MemoryType type : STORED_MEMORY_TYPES) {
+            if (!isReady(type)) {
+                continue;
+            }
+            R<?> result = milvusClient.delete(DeleteParam.newBuilder()
+                    .withCollectionName(type.collectionName())
+                    .withExpr(expression)
+                    .build());
+            if (result.getStatus() != R.Status.Success.getCode()) {
+                throw new IllegalStateException("Failed to clear " + type.collectionName()
+                        + ": " + result.getMessage());
+            }
         }
     }
 

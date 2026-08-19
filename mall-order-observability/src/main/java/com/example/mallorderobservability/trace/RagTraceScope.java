@@ -47,7 +47,7 @@ public class RagTraceScope implements AutoCloseable {
 
     public RagTraceScope error(Throwable t) {
         this.status = "ERROR";
-        this.errorMessage = t.getMessage();
+        this.errorMessage = t != null ? t.getClass().getSimpleName() : "UnknownError";
         return this;
     }
 

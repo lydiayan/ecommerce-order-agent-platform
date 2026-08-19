@@ -8,7 +8,10 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -51,10 +54,14 @@ public class HybridMemoryManager {
     }
 
     public List<MemoryEntry> searchLongTerm(float[] queryEmbedding, int topK) {
+        return searchLongTerm(defaultUserId, queryEmbedding, topK);
+    }
+
+    public List<MemoryEntry> searchLongTerm(String userId, float[] queryEmbedding, int topK) {
         if (queryEmbedding == null || queryEmbedding.length == 0 || topK <= 0) {
             return List.of();
         }
-        return longTerm.search(null, queryEmbedding, topK);
+        return longTerm.search(null, userId != null ? userId : defaultUserId, queryEmbedding, topK);
     }
 
     public String formatLongTermContext(List<MemoryEntry> entries) {
@@ -90,7 +97,8 @@ public class HybridMemoryManager {
             log.debug("USER_PROFILE is stored in MySQL, skip Milvus store for sessionId={}", sessionId);
             return null;
         }
-        String id = deterministicId(type, sessionId, normalizedContent);
+        String resolvedUserId = userId != null ? userId : defaultUserId;
+        String id = deterministicId(type, resolvedUserId, sessionId, normalizedContent);
         if (type == MemoryType.SUMMARY && longTerm.existsById(type, id)) {
             longTerm.delete(type, List.of(id));
             log.debug("Replacing existing summary for sessionId={}", sessionId);
@@ -104,7 +112,7 @@ public class HybridMemoryManager {
                 type,
                 normalizedContent,
                 sessionId,
-                userId != null ? userId : defaultUserId
+                resolvedUserId
         );
         entry.setEmbedding(embedding);
         entry.setImportance(importance);
@@ -119,12 +127,12 @@ public class HybridMemoryManager {
         return entry;
     }
 
-    private static String deterministicId(MemoryType type, String sessionId, String content) {
+    private static String deterministicId(MemoryType type, String userId, String sessionId, String content) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             String raw = type == MemoryType.SUMMARY
-                    ? type.name() + "|" + (sessionId != null ? sessionId : "") + "|summary"
-                    : type.name() + "|" + (sessionId != null ? sessionId : "") + "|" + content;
+                    ? type.name() + "|" + userId + "|" + (sessionId != null ? sessionId : "") + "|summary"
+                    : type.name() + "|" + userId + "|" + (sessionId != null ? sessionId : "") + "|" + content;
             byte[] hash = digest.digest(raw.getBytes(StandardCharsets.UTF_8));
             StringBuilder sb = new StringBuilder(32);
             for (int i = 0; i < 16; i++) {
@@ -138,6 +146,21 @@ public class HybridMemoryManager {
 
     public void clearShortTerm(String sessionId) {
         shortTerm.clear(sessionId);
+    }
+
+    public void clearUsers(Collection<String> userIds) {
+        Set<String> targets = new HashSet<>();
+        if (userIds != null) {
+            userIds.stream().filter(id -> id != null && !id.isBlank())
+                    .map(String::trim).forEach(targets::add);
+        }
+        if (targets.isEmpty()) {
+            return;
+        }
+        shortTerm.listSessions().stream()
+                .filter(session -> targets.contains(session.userId()))
+                .forEach(session -> shortTerm.clear(session.userId(), session.sessionId()));
+        longTerm.deleteByUsers(List.copyOf(targets));
     }
 
     public ShortTermMemoryManager getShortTerm() {

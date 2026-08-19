@@ -1,0 +1,115 @@
+### mall-order-agent ask 接口联调（10 条）
+@baseUrl = http://127.0.0.1:8087
+
+### 健康检查
+GET {{baseUrl}}/agent/order/health
+
+### 1. 查询我的订单
+POST {{baseUrl}}/agent/order/ask
+Content-Type: application/json
+
+{
+  "query": "查询我的订单",
+  "userId": "USER1001",
+  "conversationId": "test-ask-batch-01",
+  "topK": 5
+}
+
+### 2. 按订单号查询
+POST {{baseUrl}}/agent/order/ask
+Content-Type: application/json
+
+{
+  "query": "查询订单 ORD20260810001",
+  "userId": "USER1001",
+  "conversationId": "test-ask-batch-02",
+  "topK": 5
+}
+
+### 3. 查订单状态
+POST {{baseUrl}}/agent/order/ask
+Content-Type: application/json
+
+{
+  "query": "查一下订单号 ORD20260810001 的状态",
+  "userId": "USER1001",
+  "conversationId": "test-ask-batch-03",
+  "topK": 5
+}
+
+### 4. 退款规则
+POST {{baseUrl}}/agent/order/ask
+Content-Type: application/json
+
+{
+  "query": "退款规则是什么",
+  "userId": "USER1001",
+  "conversationId": "test-ask-batch-04",
+  "topK": 5
+}
+
+### 5. 物流时效
+POST {{baseUrl}}/agent/order/ask
+Content-Type: application/json
+
+{
+  "query": "物流配送时效是多久",
+  "userId": "USER1001",
+  "conversationId": "test-ask-batch-05",
+  "topK": 5
+}
+
+### 6. 退货流程
+POST {{baseUrl}}/agent/order/ask
+Content-Type: application/json
+
+{
+  "query": "退货流程是怎么走的",
+  "userId": "USER1001",
+  "conversationId": "test-ask-batch-06",
+  "topK": 5
+}
+
+### 7. 发货时效
+POST {{baseUrl}}/agent/order/ask
+Content-Type: application/json
+
+{
+  "query": "下单后多久发货",
+  "userId": "USER1001",
+  "conversationId": "test-ask-batch-07",
+  "topK": 5
+}
+
+### 8. 售后补偿
+POST {{baseUrl}}/agent/order/ask
+Content-Type: application/json
+
+{
+  "query": "售后补偿规则有哪些",
+  "userId": "USER1001",
+  "conversationId": "test-ask-batch-08",
+  "topK": 5
+}
+
+### 9. 敏感退款
+POST {{baseUrl}}/agent/order/ask
+Content-Type: application/json
+
+{
+  "query": "帮我退款 ORD20260810001",
+  "userId": "USER1001",
+  "conversationId": "test-ask-batch-09",
+  "topK": 5
+}
+
+### 10. 敏感退货
+POST {{baseUrl}}/agent/order/ask
+Content-Type: application/json
+
+{
+  "query": "我要退货 ORD20260810001",
+  "userId": "USER1001",
+  "conversationId": "test-ask-batch-10",
+  "topK": 5
+}
