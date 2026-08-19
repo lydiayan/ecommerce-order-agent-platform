@@ -174,11 +174,12 @@ public class OrderAgentGraphConfig {
         return state.value(AgentGraphKeys.NEXT_NODE, AnswerNode.NODE_NAME);
     }
 
-    private static boolean needsHumanReview(OverAllState state) {
+    static boolean needsHumanReview(OverAllState state) {
         if (!state.value(AgentGraphKeys.HUMAN_REVIEW_ENABLED, false)) {
             return false;
         }
-        return isDangerousOrderOp(state);
+        return state.value(AgentGraphKeys.HUMAN_APPROVAL_REQUIRED, false)
+                || isDangerousOrderOp(state);
     }
 
     private static AsyncNodeActionWithConfig interruptableNode(InterruptableAction interruptable) {

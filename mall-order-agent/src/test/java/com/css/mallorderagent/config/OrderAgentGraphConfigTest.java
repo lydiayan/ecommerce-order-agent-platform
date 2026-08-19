@@ -2,6 +2,7 @@ package com.css.mallorderagent.config;
 
 import com.alibaba.cloud.ai.graph.CompiledGraph;
 import com.alibaba.cloud.ai.graph.NodeOutput;
+import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.RunnableConfig;
 import com.alibaba.cloud.ai.graph.StateGraph;
 import com.css.mallorderagent.graph.AgentGraphKeys;
@@ -21,11 +22,28 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class OrderAgentGraphConfigTest {
+
+    @Test
+    void routesAnyPlanExplicitlyMarkedForHumanApprovalToReview() {
+        OverAllState reviewRequired = new OverAllState(Map.of(
+                AgentGraphKeys.HUMAN_REVIEW_ENABLED, true,
+                AgentGraphKeys.HUMAN_APPROVAL_REQUIRED, true,
+                AgentGraphKeys.PLAN_STRATEGY, "DANGEROUS_OP"));
+        OverAllState reviewDisabled = new OverAllState(Map.of(
+                AgentGraphKeys.HUMAN_REVIEW_ENABLED, false,
+                AgentGraphKeys.HUMAN_APPROVAL_REQUIRED, true,
+                AgentGraphKeys.PLAN_STRATEGY, "DANGEROUS_OP"));
+
+        assertTrue(OrderAgentGraphConfig.needsHumanReview(reviewRequired));
+        assertFalse(OrderAgentGraphConfig.needsHumanReview(reviewDisabled));
+    }
 
     @Test
     void generatesANewAnswerForEachTurnInTheSameCheckpointThread() throws Exception {
