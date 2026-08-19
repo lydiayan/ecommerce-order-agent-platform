@@ -221,7 +221,7 @@ CI 定义见 `.github/workflows/ci.yml`，会校验 Compose 配置并执行全 R
 
 公网部署仍需接入 TLS、正式 secret manager、外部 IdP/MFA、集中网关限流和多实例 checkpoint；仓库中的 `local-*-change-me` 默认凭据只能用于回环地址演示。
 
-## 与 AgentInsight 联动
+## 与 AgentInsight 联动(关联仓库：[AgentInsight](https://github.com/lydiayan/agent-insight))
 
 E-commerce Order Agent Platform 负责执行，AgentInsight 负责观测和评测。两者连接同一个 Elasticsearch `rag-traces` 索引后，AgentInsight 可以按 `agent.ask / TRACE_END` 统计质量，并根据 Planner、RAG、Tool、Human Span 做确定性回归。
 
