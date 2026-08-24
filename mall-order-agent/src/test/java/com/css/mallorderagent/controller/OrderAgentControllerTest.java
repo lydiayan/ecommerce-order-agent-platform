@@ -5,6 +5,7 @@ import com.css.mallorderagent.dto.HumanFeedbackRequest;
 import com.css.mallorderagent.dto.OrderAgentResponse;
 import com.css.mallorderagent.service.OrderAgentService;
 import com.css.mallorderagent.security.SecurityUserPrincipal;
+import com.css.mallorderagent.stream.AgentStreamSessionRegistry;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.AfterEach;
@@ -15,6 +16,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
+import org.springframework.core.task.AsyncTaskExecutor;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -25,10 +28,12 @@ import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doAnswer;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -39,19 +44,26 @@ class OrderAgentControllerTest {
 
     @Mock
     private OrderAgentService orderAgentService;
+    @Mock
+    private AgentStreamSessionRegistry streamRegistry;
+    @Mock
+    private AsyncTaskExecutor streamExecutor;
 
     private MockMvc mockMvc;
+    private OrderAgentController controller;
+    private SecurityUserPrincipal principal;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @BeforeEach
     void setUp() {
-        SecurityUserPrincipal principal = new SecurityUserPrincipal(
+        principal = new SecurityUserPrincipal(
                 1L, "customer.zhangwei", "", "USER1001", "张伟",
                 Set.of("CUSTOMER"), List.of("ROLE_CUSTOMER"), true, true, false, 1L);
         SecurityContextHolder.getContext().setAuthentication(
                 UsernamePasswordAuthenticationToken.authenticated(
                         principal, null, principal.getAuthorities()));
-        mockMvc = MockMvcBuilders.standaloneSetup(new OrderAgentController(orderAgentService))
+        controller = new OrderAgentController(orderAgentService, streamRegistry, streamExecutor);
+        mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setMessageConverters(new MappingJackson2HttpMessageConverter())
                 .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver())
                 .build();
@@ -130,6 +142,35 @@ class OrderAgentControllerTest {
                 .andExpect(jsonPath("$.data.operationLabel").value("退款"))
                 .andExpect(jsonPath("$.data.approvalReason").value("敏感操作"))
                 .andExpect(jsonPath("$.data.awaitingUserConfirm").value(true));
+    }
+
+    @Test
+    void askStream_runsWithAuthenticatedActorAndCompletesRegisteredStream() {
+        AskRequest request = new AskRequest();
+        request.setQuery("ORD20260810001 可以退款吗");
+        request.setConversationId("conv-stream");
+        OrderAgentResponse agentResponse = new OrderAgentResponse();
+        agentResponse.setAnswer("可以申请退款。");
+        var emitter = new org.springframework.web.servlet.mvc.method.annotation.SseEmitter();
+        when(streamRegistry.open()).thenReturn(
+                new AgentStreamSessionRegistry.StreamHandle("stream-001", emitter));
+        when(orderAgentService.askStreaming(request, "USER1001", true, "stream-001"))
+                .thenReturn(agentResponse);
+        doAnswer(invocation -> {
+            invocation.getArgument(0, Runnable.class).run();
+            return null;
+        }).when(streamExecutor).execute(any(Runnable.class));
+
+        MockHttpServletResponse servletResponse = new MockHttpServletResponse();
+        var result = controller.askStream(request, principal, servletResponse);
+
+        assertSame(emitter, result);
+        assertEquals("no-cache, no-transform", servletResponse.getHeader("Cache-Control"));
+        assertEquals("no", servletResponse.getHeader("X-Accel-Buffering"));
+        verify(streamRegistry).start("stream-001");
+        verify(orderAgentService).askStreaming(request, "USER1001", true, "stream-001");
+        verify(streamRegistry).complete("stream-001", agentResponse);
+        verify(streamRegistry).release("stream-001");
     }
 
     @Test

@@ -1,25 +1,25 @@
 name: ecommerce-order-agent-platform
 
 services:
-  mysql:
-    image: mysql:8.4.6
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-portfolio-root}
-      MYSQL_DATABASE: products
-      MYSQL_USER: portfolio
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-portfolio}
-      TZ: Asia/Shanghai
-    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
-    ports:
-      - "127.0.0.1:${MYSQL_HOST_PORT:-13306}:3306"
-    volumes:
-      - mysql-data:/var/lib/mysql
-      - ./infra/mysql/init:/docker-entrypoint-initdb.d:ro
-    healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
-      interval: 5s
-      timeout: 5s
-      retries: 30
+#  mysql:
+#    image: mysql:8.4.6
+#    environment:
+#      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-portfolio-root}
+#      MYSQL_DATABASE: products
+#      MYSQL_USER: portfolio
+#      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-portfolio}
+#      TZ: Asia/Shanghai
+#    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+#    ports:
+#      - "127.0.0.1:${MYSQL_HOST_PORT:-13306}:3306"
+#    volumes:
+#      - mysql-data:/var/lib/mysql
+#      - ./infra/mysql/init:/docker-entrypoint-initdb.d:ro
+#    healthcheck:
+#      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+#      interval: 5s
+#      timeout: 5s
+#      retries: 30
 
   redis:
     image: redis:7.4.5-alpine

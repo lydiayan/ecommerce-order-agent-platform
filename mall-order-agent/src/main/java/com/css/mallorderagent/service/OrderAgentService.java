@@ -68,6 +68,19 @@ public class OrderAgentService {
 
     public OrderAgentResponse ask(AskRequest request, String actorUserId,
                                   boolean sensitiveConfirmationAllowed) {
+        return ask(request, actorUserId, sensitiveConfirmationAllowed, null);
+    }
+
+    public OrderAgentResponse askStreaming(AskRequest request, String actorUserId,
+                                           boolean sensitiveConfirmationAllowed, String streamId) {
+        if (streamId == null || streamId.isBlank()) {
+            throw new IllegalArgumentException("streamId must not be blank");
+        }
+        return ask(request, actorUserId, sensitiveConfirmationAllowed, streamId);
+    }
+
+    private OrderAgentResponse ask(AskRequest request, String actorUserId,
+                                   boolean sensitiveConfirmationAllowed, String streamId) {
         validateAsk(request);
         String userId = requireActorUserId(actorUserId);
         sanitizeUntrustedRequest(request);
@@ -80,18 +93,19 @@ public class OrderAgentService {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                         "当前身份不能确认或取消敏感业务操作");
             }
-            return handlePendingConfirmationReply(request, userId, sessionId, threadId);
+            return handlePendingConfirmationReply(request, userId, sessionId, threadId, streamId);
         }
 
         if (!ragTraceService.isEnabled()) {
-            return askInternal(request, userId, sessionId, threadId, RagTraceScope.noop());
+            return askInternal(request, userId, sessionId, threadId, RagTraceScope.noop(), streamId);
         }
 
         Map<String, Object> attrs = baseTraceAttributes(sessionId, userId);
         attrs.put("queryLength", request.getQuery().trim().length());
         attrs.put("queryFingerprint", TracePrivacy.fingerprint(request.getQuery().trim()));
+        attrs.put("streaming", streamId != null);
         try (RagTraceScope trace = ragTraceService.begin("agent.ask", attrs)) {
-            OrderAgentResponse response = askInternal(request, userId, sessionId, threadId, trace);
+            OrderAgentResponse response = askInternal(request, userId, sessionId, threadId, trace, streamId);
             response.setTraceId(trace.traceId());
             if (response.getRetrieval() != null) {
                 response.getRetrieval().setTraceId(trace.traceId());
@@ -148,7 +162,9 @@ public class OrderAgentService {
         RunnableConfig resumeConfig = RunnableConfig.builder()
                 .threadId(threadId)
                 .resume()
-                .addStateUpdate(Map.of(AgentGraphKeys.HUMAN_FEEDBACK, feedback))
+                .addStateUpdate(Map.of(
+                        AgentGraphKeys.HUMAN_FEEDBACK, feedback,
+                        AgentGraphKeys.STREAM_ID, ""))
                 .build();
 
         log.info("Resume graph, threadId={}, approved={}, revised={}",
@@ -170,8 +186,8 @@ public class OrderAgentService {
     }
 
     private OrderAgentResponse askInternal(AskRequest request, String userId, String sessionId,
-                                           String threadId, RagTraceScope trace) {
-        Map<String, Object> inputs = buildGraphInputs(request, userId, sessionId);
+                                           String threadId, RagTraceScope trace, String streamId) {
+        Map<String, Object> inputs = buildGraphInputs(request, userId, sessionId, streamId);
 
         RunnableConfig config = RunnableConfig.builder().threadId(threadId).build();
         RagTracingAdvisor.bindParentScope(trace);
@@ -201,7 +217,8 @@ public class OrderAgentService {
         return new GraphRunResult(output, state, interrupted);
     }
 
-    private Map<String, Object> buildGraphInputs(AskRequest request, String userId, String sessionId) {
+    private Map<String, Object> buildGraphInputs(AskRequest request, String userId, String sessionId,
+                                                  String streamId) {
         Map<String, Object> inputs = new HashMap<>();
         inputs.put(AgentGraphKeys.ASK_REQUEST, request);
         inputs.put(AgentGraphKeys.QUERY, request.getQuery().trim());
@@ -215,6 +232,7 @@ public class OrderAgentService {
         inputs.put(AgentGraphKeys.AUTHORIZED_CUSTOMER_IDS, actor.authorizedCustomerIds());
         inputs.put(AgentGraphKeys.RAG_ROLE_SCOPES, actor.roleScopes());
         inputs.put(AgentGraphKeys.RAG_DEPARTMENT_SCOPES, actor.departmentScopes());
+        inputs.put(AgentGraphKeys.STREAM_ID, streamId != null ? streamId : "");
         return inputs;
     }
 
@@ -244,7 +262,8 @@ public class OrderAgentService {
     }
 
     private OrderAgentResponse handlePendingConfirmationReply(AskRequest request, String userId,
-                                                               String sessionId, String threadId) {
+                                                               String sessionId, String threadId,
+                                                               String streamId) {
         ConfirmationIntent intent = HumanApprovalDetector.parseUserConfirmationIntent(request.getQuery());
         if (intent == ConfirmationIntent.CONFIRM) {
             HumanFeedbackRequest resumeRequest = new HumanFeedbackRequest();
@@ -261,7 +280,7 @@ public class OrderAgentService {
 
         pendingConfirmationService.clear(threadId);
         log.info("Pending confirmation abandoned, sessionId={}, newQuery='{}'", sessionId, request.getQuery());
-        return askInternal(request, userId, sessionId, threadId, RagTraceScope.noop());
+        return askInternal(request, userId, sessionId, threadId, RagTraceScope.noop(), streamId);
     }
 
     private void finalizeAwaitingConfirmation(OrderAgentResponse response,

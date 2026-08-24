@@ -18,6 +18,9 @@ public class OrderAgentProperties {
     @NestedConfigurationProperty
     private OrderProperties order = new OrderProperties();
 
+    @NestedConfigurationProperty
+    private StreamingProperties streaming = new StreamingProperties();
+
     public ConversationProperties getConversation() {
         return conversation;
     }
@@ -40,6 +43,69 @@ public class OrderAgentProperties {
 
     public void setOrder(OrderProperties order) {
         this.order = order != null ? order : new OrderProperties();
+    }
+
+    public StreamingProperties getStreaming() {
+        return streaming;
+    }
+
+    public void setStreaming(StreamingProperties streaming) {
+        this.streaming = streaming != null ? streaming : new StreamingProperties();
+    }
+
+    public static class StreamingProperties {
+
+        /** SSE 连接及其后端任务的最大存活时间 */
+        private long timeoutMillis = 180_000;
+
+        /** 同时存在的流式请求上限 */
+        private int maxActiveStreams = 100;
+
+        private int corePoolSize = 4;
+
+        private int maxPoolSize = 16;
+
+        private int queueCapacity = 64;
+
+        public long getTimeoutMillis() {
+            return timeoutMillis;
+        }
+
+        public void setTimeoutMillis(long timeoutMillis) {
+            this.timeoutMillis = timeoutMillis;
+        }
+
+        public int getMaxActiveStreams() {
+            return maxActiveStreams;
+        }
+
+        public void setMaxActiveStreams(int maxActiveStreams) {
+            this.maxActiveStreams = maxActiveStreams;
+        }
+
+        public int getCorePoolSize() {
+            return corePoolSize;
+        }
+
+        public void setCorePoolSize(int corePoolSize) {
+            this.corePoolSize = corePoolSize;
+        }
+
+        public int getMaxPoolSize() {
+            return maxPoolSize;
+        }
+
+        public void setMaxPoolSize(int maxPoolSize) {
+            this.maxPoolSize = maxPoolSize;
+        }
+
+        public int getQueueCapacity() {
+            return queueCapacity;
+        }
+
+        public void setQueueCapacity(int queueCapacity) {
+            this.queueCapacity = queueCapacity;
+        }
     }
 
     public static class OrderProperties {

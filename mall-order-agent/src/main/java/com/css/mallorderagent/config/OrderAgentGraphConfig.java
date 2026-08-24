@@ -49,6 +49,7 @@ public class OrderAgentGraphConfig {
             AgentGraphKeys.AUTHORIZED_CUSTOMER_IDS,
             AgentGraphKeys.RAG_ROLE_SCOPES,
             AgentGraphKeys.RAG_DEPARTMENT_SCOPES,
+            AgentGraphKeys.STREAM_ID,
             AgentGraphKeys.HISTORY,
             AgentGraphKeys.HISTORY_COUNT,
             AgentGraphKeys.USER_PROFILE_CONTEXT,

@@ -14,7 +14,7 @@ command -v docker >/dev/null 2>&1 || { echo "docker is required" >&2; exit 1; }
 docker compose up -d
 
 echo "Waiting for infrastructure ports..."
-for target in "${MYSQL_HOST_PORT:-13306}:mysql" \
+for target in "${MYSQL_HOST_PORT:-3306}:mysql(local)" \
               "${REDIS_HOST_PORT:-16379}:redis" \
               "${MILVUS_HOST_PORT:-29530}:milvus" \
               "${ROCKETMQ_NAMESRV_HOST_PORT:-19876}:rocketmq" \

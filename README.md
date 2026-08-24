@@ -93,10 +93,11 @@ cp .env.example .env
 ### 2. 启动基础设施
 
 ```bash
+./scripts/setup-local-mysql.sh
 ./scripts/dev-up.sh
 ```
 
-该命令启动 MySQL、Redis、Milvus（含 etcd/MinIO）、RocketMQ 和 Elasticsearch。MySQL 首次启动会自动创建两套 schema 和 3 条虚构订单。宿主机默认使用 `13306/16379/29530/19876/19200` 等隔离端口，避免与常见本地开发服务冲突；容器端口保持标准值。
+第一个脚本使用本机 `3306` 端口的 MySQL，安全提示输入管理员密码，并幂等创建两套 schema、`portfolio` 本地开发账号和 3 条虚构订单。第二个脚本通过 Compose 启动 Redis、Milvus（含 etcd/MinIO）、RocketMQ 和 Elasticsearch，并检查包括本机 MySQL 在内的全部依赖端口。Docker 服务默认使用 `16379/29530/19876/19200` 等隔离端口，避免与常见本地开发服务冲突。
 
 ### 3. 启动四个应用进程
 

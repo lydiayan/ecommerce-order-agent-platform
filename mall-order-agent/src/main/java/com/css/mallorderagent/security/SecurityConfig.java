@@ -13,6 +13,7 @@ import org.springframework.security.crypto.password.DelegatingPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.csrf.CsrfException;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 import org.springframework.session.web.http.DefaultCookieSerializer;
@@ -161,13 +162,21 @@ public class SecurityConfig {
                             }
                         })
                         .accessDeniedHandler((request, response, exception) -> {
-                            auditService.record("ACCESS_DENIED", request.getUserPrincipal() != null
+                            boolean csrfDenied = exception instanceof CsrfException;
+                            auditService.record(csrfDenied ? "CSRF_DENIED" : "ACCESS_DENIED",
+                                    request.getUserPrincipal() != null
                                             ? request.getUserPrincipal().getName() : null,
-                                    request.getRequestURI(), "DENIED", null, request);
+                                    request.getRequestURI(), "DENIED",
+                                    csrfDenied ? exception.getClass().getSimpleName() : null, request);
                             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
                             response.setContentType("application/json");
+                            response.setCharacterEncoding(java.nio.charset.StandardCharsets.UTF_8.name());
                             objectMapper.writeValue(response.getWriter(),
-                                    Map.of("code", 403, "message", "没有执行该操作的权限"));
+                                    csrfDenied
+                                            ? Map.of("code", 403, "error", "CSRF_TOKEN_INVALID",
+                                                    "message", "请求校验已失效，请重试")
+                                            : Map.of("code", 403, "error", "ACCESS_DENIED",
+                                                    "message", "没有执行该操作的权限"));
                         }))
                 .headers(headers -> headers
                         .contentSecurityPolicy(csp -> csp.policyDirectives(

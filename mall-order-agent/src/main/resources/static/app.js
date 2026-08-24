@@ -7,6 +7,7 @@ const state = {
   pendingThreadId: null,
   sending: false,
   csrf: null,
+  activeAbortController: null,
 };
 
 const CATEGORY_META = {
@@ -42,17 +43,22 @@ function el(tag, className, text) {
 }
 
 async function loadCsrf() {
-  const response = await fetch('/auth/csrf');
+  const response = await fetch('/auth/csrf', { cache: 'no-store' });
   const body = await response.json();
+  if (!response.ok || body.code !== 200 || !body.data?.headerName || !body.data?.token) {
+    throw new Error(body.message || '请求校验信息获取失败');
+  }
   state.csrf = body.data;
+  return state.csrf;
 }
 
-async function api(path, options = {}) {
+async function api(path, options = {}, retryCsrf = true) {
   const request = { ...options, headers: { ...(options.headers || {}) } };
   const method = (request.method || 'GET').toUpperCase();
-  if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
-    if (!state.csrf) await loadCsrf();
-    request.headers[state.csrf.headerName] = state.csrf.token;
+  const requiresCsrf = !['GET', 'HEAD', 'OPTIONS'].includes(method);
+  if (requiresCsrf) {
+    const csrf = await loadCsrf();
+    request.headers[csrf.headerName] = csrf.token;
   }
   const response = await fetch(path, request);
   if (response.status === 401) {
@@ -63,15 +69,106 @@ async function api(path, options = {}) {
     window.location.replace('/change-password.html');
     throw new Error('需要先修改密码');
   }
+  const responseText = await response.text();
   let body;
-  try { body = await response.json(); } catch { throw new Error('服务返回了无法解析的响应'); }
+  try {
+    body = JSON.parse(responseText);
+  } catch {
+    const contentType = response.headers.get('content-type') || 'unknown';
+    const summary = responseText.replace(/\s+/g, ' ').trim().slice(0, 160);
+    throw new Error(`HTTP ${response.status}，响应类型 ${contentType}`
+      + (summary ? `：${summary}` : '，响应内容为空'));
+  }
+  if (response.status === 403 && body.error === 'CSRF_TOKEN_INVALID' && requiresCsrf && retryCsrf) {
+    state.csrf = null;
+    return api(path, options, false);
+  }
   if (!response.ok || body.code !== 200) throw new Error(body.message || ('HTTP ' + response.status));
   return body.data;
+}
+
+async function streamApi(path, options, onEvent, retryCsrf = true) {
+  const request = { ...options, headers: { ...(options.headers || {}) } };
+  const csrf = await loadCsrf();
+  request.headers[csrf.headerName] = csrf.token;
+
+  const response = await fetch(path, request);
+  if (response.status === 401) {
+    window.location.replace('/login.html');
+    throw new Error('登录已失效');
+  }
+  if (response.status === 428) {
+    window.location.replace('/change-password.html');
+    throw new Error('需要先修改密码');
+  }
+
+  const contentType = response.headers.get('content-type') || '';
+  if (!response.ok || !contentType.includes('text/event-stream')) {
+    const responseText = await response.text();
+    let body = null;
+    try { body = JSON.parse(responseText); } catch { /* 使用下面的 HTTP 错误 */ }
+    if (response.status === 403 && body?.error === 'CSRF_TOKEN_INVALID' && retryCsrf) {
+      state.csrf = null;
+      return streamApi(path, options, onEvent, false);
+    }
+    throw new Error(body?.message || `HTTP ${response.status}`);
+  }
+  if (!response.body) throw new Error('浏览器无法读取流式响应');
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  const dispatchFrame = (frame) => {
+    let eventName = 'message';
+    const dataLines = [];
+    frame.split(/\r?\n/).forEach((line) => {
+      if (!line || line.startsWith(':')) return;
+      if (line.startsWith('event:')) eventName = line.slice(6).trim();
+      else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
+    });
+    if (!dataLines.length) return;
+    const rawData = dataLines.join('\n');
+    let data;
+    try { data = JSON.parse(rawData); }
+    catch { throw new Error('流式响应格式错误'); }
+    onEvent(eventName, data);
+  };
+
+  const drainFrames = (flush = false) => {
+    let boundary = buffer.search(/\r?\n\r?\n/);
+    while (boundary >= 0) {
+      const match = buffer.slice(boundary).match(/^(?:\r?\n){2}/)[0];
+      const frame = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + match.length);
+      if (frame.trim()) dispatchFrame(frame);
+      boundary = buffer.search(/\r?\n\r?\n/);
+    }
+    if (flush && buffer.trim()) {
+      dispatchFrame(buffer);
+      buffer = '';
+    }
+  };
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    drainFrames();
+  }
+  buffer += decoder.decode();
+  drainFrames(true);
 }
 
 function appendMessage(role, text) {
   const message = el('div', 'message ' + role, text);
   $('messages').appendChild(message);
+  $('messages').scrollTop = $('messages').scrollHeight;
+  return message;
+}
+
+function updateMessage(message, text) {
+  message.textContent = text;
   $('messages').scrollTop = $('messages').scrollHeight;
 }
 
@@ -194,30 +291,69 @@ function removeProgressMessage() {
   if (last?.classList.contains('progress')) last.remove();
 }
 
-function handleAskResponse(data) {
+function handleAskResponse(data, message = null) {
   state.awaitingConfirm = Boolean(data.awaitingUserConfirm
     || (data.interrupted && data.planStrategy === 'DANGEROUS_ORDER_OP'));
   state.pendingThreadId = state.awaitingConfirm ? data.threadId : null;
   updateComposer();
-  appendMessage('assistant', data.answer || '当前没有可展示的回答。');
+  const answer = data.answer || '当前没有可展示的回答。';
+  if (message) {
+    message.classList.remove('progress');
+    updateMessage(message, answer);
+  } else appendMessage('assistant', answer);
 }
 
 async function ask(query) {
   setSending(true);
   appendMessage('user', query);
   $('queryInput').value = '';
-  appendMessage('assistant progress', '处理中');
+  const answerMessage = appendMessage('assistant progress', '处理中');
+  const abortController = new AbortController();
+  state.activeAbortController = abortController;
+  let receivedDelta = false;
+  let completed = false;
+  let streamedAnswer = '';
+  let renderScheduled = false;
+  const renderStreamedAnswer = () => {
+    renderScheduled = false;
+    updateMessage(answerMessage, streamedAnswer);
+  };
   try {
-    const data = await api('/agent/order/ask', {
+    await streamApi('/agent/order/ask/stream', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query, conversationId: state.conversationId }),
+      signal: abortController.signal,
+    }, (eventName, data) => {
+      if (eventName === 'delta') {
+        if (!receivedDelta) {
+          receivedDelta = true;
+          answerMessage.classList.remove('progress');
+          updateMessage(answerMessage, '');
+        }
+        streamedAnswer += data.text || '';
+        if (!renderScheduled) {
+          renderScheduled = true;
+          window.requestAnimationFrame(renderStreamedAnswer);
+        }
+      } else if (eventName === 'complete') {
+        completed = true;
+        streamedAnswer = data.answer || streamedAnswer;
+        handleAskResponse(data, answerMessage);
+      } else if (eventName === 'error') {
+        throw new Error(data.message || '请求处理失败');
+      }
     });
-    removeProgressMessage();
-    handleAskResponse(data);
+    if (!completed) throw new Error('连接已结束，但回答未完成');
   } catch (error) {
-    removeProgressMessage();
-    appendMessage('assistant', '请求失败：' + error.message);
-  } finally { setSending(false); }
+    answerMessage.classList.remove('progress');
+    const prefix = receivedDelta && streamedAnswer
+      ? streamedAnswer + '\n\n回答中断：' : '请求失败：';
+    streamedAnswer = prefix + error.message;
+    updateMessage(answerMessage, streamedAnswer);
+  } finally {
+    if (state.activeAbortController === abortController) state.activeAbortController = null;
+    setSending(false);
+  }
 }
 
 async function resume(approved) {
@@ -301,3 +437,5 @@ async function init() {
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
 else init();
+
+window.addEventListener('beforeunload', () => state.activeAbortController?.abort());

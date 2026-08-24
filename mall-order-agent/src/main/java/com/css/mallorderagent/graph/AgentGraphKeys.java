@@ -15,6 +15,9 @@ public final class AgentGraphKeys {
     public static final String RAG_ROLE_SCOPES = "ragRoleScopes";
     public static final String RAG_DEPARTMENT_SCOPES = "ragDepartmentScopes";
 
+    /** 当前请求对应的短期 SSE 会话；只在流式 HTTP 接口中存在 */
+    public static final String STREAM_ID = "streamId";
+
     public static final String HISTORY = "history";
     public static final String HISTORY_COUNT = "historyCount";
     public static final String USER_PROFILE_CONTEXT = "userProfileContext";

@@ -100,6 +100,8 @@ public class ElasticsearchTraceRepository {
                                 .properties("contextChunks", Property.of(p -> p.long_(l -> l)))
                                 .properties("answerLength", Property.of(p -> p.long_(l -> l)))
                                 .properties("outputLength", Property.of(p -> p.long_(l -> l)))
+                                .properties("streaming", Property.of(p -> p.boolean_(b -> b)))
+                                .properties("firstTokenLatencyMs", Property.of(p -> p.long_(l -> l)))
                                 .properties("promptVersion", Property.of(p -> p.keyword(k -> k)))
                                 .properties("promptLength", Property.of(p -> p.long_(l -> l)))
                                 .properties("chunkCount", Property.of(p -> p.long_(l -> l)))
@@ -126,7 +128,7 @@ public class ElasticsearchTraceRepository {
         }
     }
 
-    private Map<String, Object> toDocument(TraceEvent event) {
+    Map<String, Object> toDocument(TraceEvent event) {
         Map<String, Object> doc = new LinkedHashMap<>();
         doc.put("eventId", event.getEventId());
         doc.put("traceId", event.getTraceId());
@@ -215,11 +217,16 @@ public class ElasticsearchTraceRepository {
         copyIfPresent(doc, attributes, "contextChunks");
         copyIfPresent(doc, attributes, "outputLength");
         copyIfPresent(doc, attributes, "temperature");
+        copyIfPresent(doc, attributes, "streaming");
+        copyIfPresent(doc, attributes, "ttftMs");
+        copyIfPresent(doc, attributes, "firstTokenLatencyMs");
+        copyIfPresent(doc, attributes, "chunkCount");
 
         Map<String, Object> slimAttributes = new LinkedHashMap<>();
         for (String key : List.of(
                 "model", "temperature", "contextChunks",
                 "inputToken", "outputToken", "finishReason", "outputLength",
+                "streaming", "ttftMs", "firstTokenLatencyMs", "chunkCount",
                 "durationMs", "startTimestampMs")) {
             if (attributes.containsKey(key)) {
                 slimAttributes.put(key, attributes.get(key));
