@@ -254,6 +254,7 @@ public class OrderAgentService {
         response.setGrounded(grounded);
         response.setPlanStrategy(planStrategy);
         response.setRetrieval(retrieval);
+        response.setToolSummary(state.value(AgentGraphKeys.TOOL_RESULT, ""));
         response.setInterrupted(interrupted);
         response.setThreadId(threadId);
         response.setApprovalReason(state.value(AgentGraphKeys.APPROVAL_REASON, ""));

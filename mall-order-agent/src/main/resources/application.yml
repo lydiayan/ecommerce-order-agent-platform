@@ -42,7 +42,7 @@ spring:
           model: text-embedding-v2
       chat:
         options:
-          model: qwen-plus
+          model: ${AGENT_MODEL_NAME:qwen-plus}
           temperature: 0.3
     mcp:
       client:
@@ -96,6 +96,12 @@ agent:
     core-pool-size: ${AGENT_STREAM_CORE_POOL_SIZE:4}
     max-pool-size: ${AGENT_STREAM_MAX_POOL_SIZE:16}
     queue-capacity: ${AGENT_STREAM_QUEUE_CAPACITY:64}
+  feedback:
+    enabled: ${AGENT_FEEDBACK_ENABLED:true}
+    retention-days: ${AGENT_FEEDBACK_RETENTION_DAYS:90}
+    encryption-key: ${AGENT_FEEDBACK_ENCRYPTION_KEY:local-feedback-key-change-before-production}
+    model-name: ${AGENT_MODEL_NAME:qwen-plus}
+    agent-version: ${AGENT_VERSION:dev}
   graph:
     human-review-enabled: true # 敏感操作人工审核（退货/付款/删除/确认类回复）
   order:

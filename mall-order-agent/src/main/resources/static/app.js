@@ -29,6 +29,16 @@ const STATUS_MAP = {
   4: { text: '已取消', cls: 'status-cancelled' },
 };
 
+const FEEDBACK_REASONS = [
+  ['INCORRECT', '回答错误'],
+  ['IRRELEVANT', '答非所问'],
+  ['INCOMPLETE', '信息不完整'],
+  ['TOOL_FAILURE', '工具执行失败'],
+  ['HARD_TO_UNDERSTAND', '难以理解'],
+  ['SAFETY_RISK', '存在安全风险'],
+  ['OTHER', '其他'],
+];
+
 function createConversationId() {
   const suffix = window.crypto?.randomUUID ? window.crypto.randomUUID()
     : Date.now() + '-' + Math.random().toString(16).slice(2);
@@ -172,6 +182,100 @@ function updateMessage(message, text) {
   $('messages').scrollTop = $('messages').scrollHeight;
 }
 
+function appendFeedbackControls(message, response) {
+  if (!response.feedbackEnabled || !response.responseId) return;
+  const feedbackState = { rating: null, busy: false };
+  const actions = el('div', 'feedback-actions');
+  const up = el('button', 'feedback-button', '👍');
+  const down = el('button', 'feedback-button', '👎');
+  const status = el('span', 'feedback-status');
+  const panel = el('form', 'feedback-panel hidden');
+  up.type = down.type = 'button';
+  up.title = '赞';
+  up.setAttribute('aria-label', '赞');
+  down.title = '踩';
+  down.setAttribute('aria-label', '踩');
+
+  const reasonList = el('div', 'feedback-reasons');
+  FEEDBACK_REASONS.forEach(([value, label]) => {
+    const option = el('label', 'feedback-reason');
+    const checkbox = el('input');
+    checkbox.type = 'checkbox';
+    checkbox.value = value;
+    option.append(checkbox, el('span', '', label));
+    reasonList.appendChild(option);
+  });
+  const comment = el('textarea', 'feedback-comment');
+  comment.maxLength = 500;
+  comment.rows = 3;
+  comment.placeholder = '补充说明（选填）';
+  const submit = el('button', 'button button-quiet feedback-submit', '提交补充');
+  submit.type = 'submit';
+  panel.append(reasonList, comment, submit);
+
+  const render = () => {
+    up.classList.toggle('selected', feedbackState.rating === 'UP');
+    down.classList.toggle('selected', feedbackState.rating === 'DOWN');
+    up.setAttribute('aria-pressed', String(feedbackState.rating === 'UP'));
+    down.setAttribute('aria-pressed', String(feedbackState.rating === 'DOWN'));
+    up.disabled = down.disabled = submit.disabled = feedbackState.busy;
+    panel.classList.toggle('hidden', feedbackState.rating !== 'DOWN');
+  };
+
+  const save = async (rating, reasons = [], feedbackComment = '') => {
+    feedbackState.busy = true;
+    status.classList.remove('error');
+    status.textContent = '';
+    render();
+    try {
+      const saved = await api('/agent/feedback', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ responseId: response.responseId, rating, reasons, comment: feedbackComment }),
+      });
+      feedbackState.rating = saved.rating;
+      status.textContent = rating === 'DOWN' ? '已记录，可补充原因' : '感谢反馈';
+    } catch (error) {
+      status.classList.add('error');
+      status.textContent = error.message;
+    } finally {
+      feedbackState.busy = false;
+      render();
+    }
+  };
+
+  const cancel = async () => {
+    feedbackState.busy = true;
+    status.classList.remove('error');
+    status.textContent = '';
+    render();
+    try {
+      await api(`/agent/feedback/${response.responseId}`, { method: 'DELETE' });
+      feedbackState.rating = null;
+      reasonList.querySelectorAll('input').forEach((input) => { input.checked = false; });
+      comment.value = '';
+      status.textContent = '已取消';
+    } catch (error) {
+      status.classList.add('error');
+      status.textContent = error.message;
+    } finally {
+      feedbackState.busy = false;
+      render();
+    }
+  };
+
+  up.addEventListener('click', () => feedbackState.rating === 'UP' ? cancel() : save('UP'));
+  down.addEventListener('click', () => feedbackState.rating === 'DOWN' ? cancel() : save('DOWN'));
+  panel.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const reasons = [...reasonList.querySelectorAll('input:checked')].map((input) => input.value);
+    save('DOWN', reasons, comment.value.trim());
+  });
+
+  actions.append(up, down, status);
+  message.append(actions, panel);
+  render();
+}
+
 function setSending(active) {
   state.sending = active;
   $('sendBtn').disabled = active;
@@ -286,11 +390,6 @@ function parseConfirmIntent(text) {
   return 'unknown';
 }
 
-function removeProgressMessage() {
-  const last = $('messages').lastElementChild;
-  if (last?.classList.contains('progress')) last.remove();
-}
-
 function handleAskResponse(data, message = null) {
   state.awaitingConfirm = Boolean(data.awaitingUserConfirm
     || (data.interrupted && data.planStrategy === 'DANGEROUS_ORDER_OP'));
@@ -300,7 +399,8 @@ function handleAskResponse(data, message = null) {
   if (message) {
     message.classList.remove('progress');
     updateMessage(message, answer);
-  } else appendMessage('assistant', answer);
+  } else message = appendMessage('assistant', answer);
+  appendFeedbackControls(message, data);
 }
 
 async function ask(query) {
@@ -316,6 +416,7 @@ async function ask(query) {
   let renderScheduled = false;
   const renderStreamedAnswer = () => {
     renderScheduled = false;
+    if (completed) return;
     updateMessage(answerMessage, streamedAnswer);
   };
   try {
@@ -358,21 +459,17 @@ async function ask(query) {
 
 async function resume(approved) {
   setSending(true);
-  appendMessage('assistant progress', '处理中');
+  const answerMessage = appendMessage('assistant progress', '处理中');
   try {
     const data = await api('/agent/order/resume', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ threadId: state.pendingThreadId, approved }),
     });
-    removeProgressMessage();
-    state.awaitingConfirm = false;
-    state.pendingThreadId = null;
-    updateComposer();
-    appendMessage('assistant', data.answer || '操作已处理。');
+    handleAskResponse(data, answerMessage);
     await loadWorkspace();
   } catch (error) {
-    removeProgressMessage();
-    appendMessage('assistant', '操作失败：' + error.message);
+    answerMessage.classList.remove('progress');
+    updateMessage(answerMessage, '操作失败：' + error.message);
   } finally { setSending(false); }
 }
 

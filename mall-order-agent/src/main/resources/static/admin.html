@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>安全管理 · 商城订单 Agent</title>
-  <link rel="stylesheet" href="/auth.css">
+  <link rel="stylesheet" href="/auth.css?v=20260824c">
 </head>
 <body class="admin-body">
 <header class="admin-header">
@@ -15,6 +15,7 @@
   <nav class="admin-tabs" aria-label="管理视图">
     <button class="tab active" data-tab="users" type="button">账户</button>
     <button class="tab" data-tab="tokens" type="button">评测令牌</button>
+    <button class="tab" data-tab="badCases" type="button">Bad Case</button>
     <button class="tab" data-tab="audit" type="button">安全审计</button>
   </nav>
 
@@ -48,6 +49,29 @@
     <div class="section-heading"><div><h1>安全审计</h1><p>保留 180 天，用户和资源以脱敏指纹显示</p></div><button class="secondary compact" id="refreshAudit" type="button">刷新</button></div>
     <div class="table-wrap"><table><thead><tr><th>时间</th><th>事件</th><th>主体</th><th>资源</th><th>结果</th><th>来源</th></tr></thead><tbody id="auditRows"></tbody></table></div>
   </section>
+
+  <section class="admin-section hidden" id="badCasesPanel">
+    <div class="section-heading"><div><h1>Bad Case</h1><p>Agent 回答质量闭环</p></div><button class="secondary compact" id="refreshBadCases" type="button">刷新</button></div>
+    <div class="metric-strip" id="feedbackMetrics">
+      <div><span>回答</span><strong id="metricResponses">—</strong></div>
+      <div><span>反馈</span><strong id="metricFeedback">—</strong></div>
+      <div><span>参与率</span><strong id="metricParticipation">—</strong></div>
+      <div><span>点踩率</span><strong id="metricDownRate">—</strong></div>
+      <div><span>已解决</span><strong id="metricResolved">—</strong></div>
+    </div>
+    <form class="filter-form" id="badCaseFilters">
+      <label>状态<select id="badCaseStatusFilter"><option value="">全部</option><option>NEW</option><option>TRIAGED</option><option>IN_PROGRESS</option><option>RESOLVED</option><option>IGNORED</option></select></label>
+      <label>点踩原因<select id="badCaseReasonFilter"><option value="">全部</option><option value="INCORRECT">回答错误</option><option value="IRRELEVANT">答非所问</option><option value="INCOMPLETE">信息不完整</option><option value="TOOL_FAILURE">工具执行失败</option><option value="HARD_TO_UNDERSTAND">难以理解</option><option value="SAFETY_RISK">存在安全风险</option><option value="OTHER">其他</option></select></label>
+      <label>策略<input id="badCaseStrategyFilter" maxlength="64" placeholder="例如 RAG_QA"></label>
+      <label>模型<input id="badCaseModelFilter" maxlength="128" placeholder="例如 qwen-plus"></label>
+      <label>Agent 版本<input id="badCaseVersionFilter" maxlength="64"></label>
+      <label>开始日期<input id="badCaseFromFilter" type="date"></label>
+      <label>结束日期<input id="badCaseToFilter" type="date"></label>
+      <button class="primary compact" type="submit">筛选</button>
+    </form>
+    <p class="notice" id="badCaseNotice" role="status"></p>
+    <div class="table-wrap"><table><thead><tr><th>更新时间</th><th>状态</th><th>优先级</th><th>原因</th><th>策略 / 模型</th><th>负责人</th><th>操作</th></tr></thead><tbody id="badCaseRows"></tbody></table></div>
+  </section>
 </main>
 <dialog id="passwordDialog">
   <form method="dialog" id="resetPasswordForm">
@@ -66,6 +90,25 @@
     <div class="dialog-actions"><button class="secondary compact" type="button" id="cancelImpersonation">取消</button><button class="primary compact" type="submit">进入</button></div>
   </form>
 </dialog>
-<script src="/admin.js" defer></script>
+<dialog id="badCaseDialog" class="bad-case-dialog">
+  <form method="dialog" id="badCaseForm">
+    <div class="bad-case-dialog-heading"><div><h2>Bad Case <span id="badCaseId"></span></h2><p id="badCaseMeta"></p></div><button class="secondary compact" id="closeBadCase" type="button">关闭</button></div>
+    <div class="bad-case-copy"><strong>用户问题</strong><pre id="badCaseQuery"></pre></div>
+    <div class="bad-case-copy"><strong>Agent 回答</strong><pre id="badCaseAnswer"></pre></div>
+    <div class="bad-case-copy"><strong>工具摘要</strong><pre id="badCaseToolSummary"></pre></div>
+    <div class="bad-case-copy"><strong>反馈</strong><p id="badCaseFeedback"></p></div>
+    <div class="bad-case-fields">
+      <label>状态<select id="badCaseStatus" required></select></label>
+      <label>问题分类<input id="badCaseCategory" maxlength="64"></label>
+      <label>负责人<input id="badCaseOwner" maxlength="64"></label>
+      <label>修复版本<input id="badCaseFixVersion" maxlength="64"></label>
+    </div>
+    <label>根因<textarea id="badCaseRootCause" maxlength="2000" rows="3"></textarea></label>
+    <label>处理结论<textarea id="badCaseResolution" maxlength="2000" rows="3"></textarea></label>
+    <p class="notice" id="badCaseDialogNotice" role="status"></p>
+    <div class="dialog-actions"><button class="secondary compact" id="copyTrace" type="button">复制 Trace</button><button class="primary compact" type="submit">保存</button></div>
+  </form>
+</dialog>
+<script src="/admin.js?v=20260824c" defer></script>
 </body>
 </html>

@@ -90,6 +90,7 @@ services:
     volumes:
       - ./infra/rocketmq/broker.conf:/home/rocketmq/broker.conf:ro
 
+  # Shared Trace storage for the order observability service and AgentInsight.
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.17.4
     environment:

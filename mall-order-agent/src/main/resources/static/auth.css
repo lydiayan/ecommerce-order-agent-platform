@@ -7,7 +7,7 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; min-height: 100vh; background: #f4f6f8; }
-button, input, select { font: inherit; letter-spacing: 0; }
+button, input, select, textarea { font: inherit; letter-spacing: 0; }
 .auth-shell { min-height: 100vh; display: grid; grid-template-columns: minmax(280px, 420px) minmax(0, 1fr); }
 .auth-panel { background: #fff; border-right: 1px solid #dfe4e8; padding: 56px 48px; display: flex; flex-direction: column; justify-content: center; }
 .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 40px; }
@@ -48,7 +48,7 @@ h1 { margin: 0 0 8px; font-size: 26px; letter-spacing: 0; }
 .compact { width: auto; min-width: 76px; height: 38px; padding: 0 14px; }
 .inline-form { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; padding: 14px; margin-bottom: 16px; background: #f8faf8; border: 1px solid #dfe4e8; }
 .inline-form label, dialog label { display: grid; gap: 6px; color: #53605b; font-size: 12px; }
-.inline-form input, .inline-form select, dialog input { height: 38px; min-width: 180px; padding: 0 10px; border: 1px solid #cbd3d9; border-radius: 5px; background: #fff; }
+.inline-form input, .inline-form select, dialog input, dialog select { height: 38px; min-width: 180px; padding: 0 10px; border: 1px solid #cbd3d9; border-radius: 5px; background: #fff; }
 .table-wrap { overflow-x: auto; border: 1px solid #dfe4e8; background: #fff; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td { padding: 12px 14px; border-bottom: 1px solid #edf0ed; text-align: left; white-space: nowrap; }
@@ -64,6 +64,25 @@ dialog::backdrop { background: rgba(24,34,31,.35); }
 dialog h2 { margin: 0 0 6px; font-size: 18px; }
 dialog p { margin: 0 0 16px; color: #66727d; }
 dialog input { width: 100%; }
+.filter-form { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
+.filter-form label { display: grid; gap: 5px; color: #53605b; font-size: 12px; }
+.filter-form input, .filter-form select { height: 38px; min-width: 160px; padding: 0 9px; border: 1px solid #cbd3d9; border-radius: 5px; background: #fff; }
+.metric-strip { display: grid; grid-template-columns: repeat(5, minmax(110px, 1fr)); border: 1px solid #dfe4e8; background: #fff; }
+.metric-strip > div { min-width: 0; padding: 13px 15px; border-right: 1px solid #edf0ed; }
+.metric-strip > div:last-child { border-right: 0; }
+.metric-strip span, .metric-strip strong { display: block; }
+.metric-strip span { color: #66727d; font-size: 11px; }
+.metric-strip strong { margin-top: 5px; font-size: 19px; }
+.empty-table { color: #66727d; text-align: center; }
+.bad-case-dialog { width: min(880px, calc(100% - 32px)); max-height: calc(100vh - 40px); overflow-y: auto; }
+.bad-case-dialog-heading { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+.bad-case-dialog-heading h2 span { color: #66727d; font-weight: 500; }
+.bad-case-copy { margin: 14px 0; }
+.bad-case-copy strong { font-size: 12px; }
+.bad-case-copy pre, .bad-case-copy p { margin: 6px 0 0; padding: 10px; border: 1px solid #e2e7e3; background: #f8faf8; color: #27332e; font-family: inherit; font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.bad-case-fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 14px 0; }
+.bad-case-fields input, .bad-case-fields select { width: 100%; min-width: 0; }
+.bad-case-dialog textarea { width: 100%; resize: vertical; padding: 9px 10px; border: 1px solid #cbd3d9; border-radius: 5px; line-height: 1.5; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 @media (max-width: 760px) {
   .auth-shell { grid-template-columns: 1fr; }
@@ -75,4 +94,9 @@ dialog input { width: 100%; }
   .section-heading { align-items: flex-start; }
   .inline-form { display: grid; }
   .inline-form input, .inline-form select { width: 100%; min-width: 0; }
+  .metric-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .metric-strip > div { border-bottom: 1px solid #edf0ed; }
+  .filter-form { display: grid; }
+  .filter-form input, .filter-form select { width: 100%; min-width: 0; }
+  .bad-case-fields { grid-template-columns: 1fr; }
 }

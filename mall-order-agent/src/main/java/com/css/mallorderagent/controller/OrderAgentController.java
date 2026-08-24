@@ -5,6 +5,7 @@ import com.css.mallorderagent.dto.AbandonConversationRequest;
 import com.css.mallorderagent.dto.HumanFeedbackRequest;
 import com.css.mallorderagent.dto.OrderAgentResponse;
 import com.css.mallorderagent.service.OrderAgentService;
+import com.css.mallorderagent.feedback.AgentFeedbackService;
 import com.css.mallorderagent.security.SecurityUserPrincipal;
 import com.css.mallorderagent.security.ImpersonationService;
 import com.css.mallorderagent.stream.AgentStreamDisconnectedException;
@@ -36,13 +37,16 @@ public class OrderAgentController {
     private static final Logger log = LoggerFactory.getLogger(OrderAgentController.class);
 
     private final OrderAgentService orderAgentService;
+    private final AgentFeedbackService feedbackService;
     private final AgentStreamSessionRegistry streamRegistry;
     private final AsyncTaskExecutor streamExecutor;
 
     public OrderAgentController(OrderAgentService orderAgentService,
+                                AgentFeedbackService feedbackService,
                                 AgentStreamSessionRegistry streamRegistry,
                                 @Qualifier("agentStreamExecutor") AsyncTaskExecutor streamExecutor) {
         this.orderAgentService = orderAgentService;
+        this.feedbackService = feedbackService;
         this.streamRegistry = streamRegistry;
         this.streamExecutor = streamExecutor;
     }
@@ -63,6 +67,8 @@ public class OrderAgentController {
                 request != null ? request.getConversationId() : null);
         OrderAgentResponse response = orderAgentService.ask(request, principal.actorUserId(),
                 !ImpersonationService.isImpersonating(principal));
+        feedbackService.registerResponse(response, principal.userId(), principal.actorUserId(),
+                !ImpersonationService.isImpersonating(principal));
         return ApiResponse.success(response);
     }
 
@@ -81,7 +87,8 @@ public class OrderAgentController {
         boolean sensitiveConfirmationAllowed = !ImpersonationService.isImpersonating(principal);
         try {
             streamExecutor.execute(() -> runStreamRequest(
-                    request, principal.actorUserId(), sensitiveConfirmationAllowed, stream.streamId()));
+                    request, principal.userId(), principal.actorUserId(),
+                    sensitiveConfirmationAllowed, stream.streamId()));
         } catch (RuntimeException e) {
             log.warn("Unable to schedule agent stream {}: {}", stream.streamId(), e.getMessage());
             streamRegistry.fail(stream.streamId(), new AgentStreamSessionRegistry.StreamError(
@@ -101,6 +108,7 @@ public class OrderAgentController {
                 request != null ? request.getThreadId() : null,
                 request != null ? request.getApproved() : null);
         OrderAgentResponse response = orderAgentService.resume(request, principal.actorUserId());
+        feedbackService.registerResponse(response, principal.userId(), principal.actorUserId(), true);
         return ApiResponse.success(response);
     }
 
@@ -118,11 +126,13 @@ public class OrderAgentController {
         }
     }
 
-    private void runStreamRequest(AskRequest request, String actorUserId,
+    private void runStreamRequest(AskRequest request, long appUserId, String actorUserId,
                                   boolean sensitiveConfirmationAllowed, String streamId) {
         try {
             OrderAgentResponse response = orderAgentService.askStreaming(
                     request, actorUserId, sensitiveConfirmationAllowed, streamId);
+            feedbackService.registerResponse(
+                    response, appUserId, actorUserId, sensitiveConfirmationAllowed);
             streamRegistry.complete(streamId, response);
         } catch (AgentStreamDisconnectedException e) {
             log.debug("Agent stream {} disconnected", streamId);

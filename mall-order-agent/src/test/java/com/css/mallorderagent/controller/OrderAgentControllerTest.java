@@ -3,6 +3,7 @@ package com.css.mallorderagent.controller;
 import com.css.mallorderagent.dto.AskRequest;
 import com.css.mallorderagent.dto.HumanFeedbackRequest;
 import com.css.mallorderagent.dto.OrderAgentResponse;
+import com.css.mallorderagent.feedback.AgentFeedbackService;
 import com.css.mallorderagent.service.OrderAgentService;
 import com.css.mallorderagent.security.SecurityUserPrincipal;
 import com.css.mallorderagent.stream.AgentStreamSessionRegistry;
@@ -45,6 +46,8 @@ class OrderAgentControllerTest {
     @Mock
     private OrderAgentService orderAgentService;
     @Mock
+    private AgentFeedbackService feedbackService;
+    @Mock
     private AgentStreamSessionRegistry streamRegistry;
     @Mock
     private AsyncTaskExecutor streamExecutor;
@@ -62,7 +65,7 @@ class OrderAgentControllerTest {
         SecurityContextHolder.getContext().setAuthentication(
                 UsernamePasswordAuthenticationToken.authenticated(
                         principal, null, principal.getAuthorities()));
-        controller = new OrderAgentController(orderAgentService, streamRegistry, streamExecutor);
+        controller = new OrderAgentController(orderAgentService, feedbackService, streamRegistry, streamExecutor);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setMessageConverters(new MappingJackson2HttpMessageConverter())
                 .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver())
@@ -91,6 +94,7 @@ class OrderAgentControllerTest {
         agentResponse.setConversationId("conv-001");
         agentResponse.setPlanStrategy("RAG_QA");
         agentResponse.setGrounded(true);
+        agentResponse.setToolSummary("internal tool output");
         when(orderAgentService.ask(any(AskRequest.class), eq("USER1001"), eq(true))).thenReturn(agentResponse);
 
         AskRequest request = new AskRequest();
@@ -107,10 +111,12 @@ class OrderAgentControllerTest {
                 .andExpect(jsonPath("$.data.answer").value("您有 1 笔待发货订单。"))
                 .andExpect(jsonPath("$.data.conversationId").value("conv-001"))
                 .andExpect(jsonPath("$.data.planStrategy").value("RAG_QA"))
-                .andExpect(jsonPath("$.data.grounded").value(true));
+                .andExpect(jsonPath("$.data.grounded").value(true))
+                .andExpect(jsonPath("$.data.toolSummary").doesNotExist());
 
         ArgumentCaptor<AskRequest> captor = ArgumentCaptor.forClass(AskRequest.class);
         verify(orderAgentService).ask(captor.capture(), eq("USER1001"), eq(true));
+        verify(feedbackService).registerResponse(agentResponse, 1L, "USER1001", true);
         assertEquals("我的订单状态？", captor.getValue().getQuery());
         assertEquals("conv-001", captor.getValue().getConversationId());
         assertEquals("USER1005", captor.getValue().getUserId());
@@ -169,6 +175,7 @@ class OrderAgentControllerTest {
         assertEquals("no", servletResponse.getHeader("X-Accel-Buffering"));
         verify(streamRegistry).start("stream-001");
         verify(orderAgentService).askStreaming(request, "USER1001", true, "stream-001");
+        verify(feedbackService).registerResponse(agentResponse, 1L, "USER1001", true);
         verify(streamRegistry).complete("stream-001", agentResponse);
         verify(streamRegistry).release("stream-001");
     }
@@ -198,6 +205,7 @@ class OrderAgentControllerTest {
         verify(orderAgentService).resume(captor.capture(), eq("USER1001"));
         assertEquals("thread-xyz", captor.getValue().getThreadId());
         assertEquals(true, captor.getValue().getApproved());
+        verify(feedbackService).registerResponse(agentResponse, 1L, "USER1001", true);
     }
 
     @Test

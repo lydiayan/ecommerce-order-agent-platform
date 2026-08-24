@@ -2,6 +2,21 @@ let csrf;
 let selectedUser;
 let selectedIdentity;
 let impersonationEnabled = false;
+let selectedBadCase;
+
+const BAD_CASE_REASONS = {
+  INCORRECT: '回答错误', IRRELEVANT: '答非所问', INCOMPLETE: '信息不完整',
+  TOOL_FAILURE: '工具执行失败', HARD_TO_UNDERSTAND: '难以理解',
+  SAFETY_RISK: '存在安全风险', OTHER: '其他',
+};
+
+const BAD_CASE_TRANSITIONS = {
+  NEW: ['NEW', 'TRIAGED', 'IGNORED'],
+  TRIAGED: ['TRIAGED', 'IN_PROGRESS', 'IGNORED'],
+  IN_PROGRESS: ['IN_PROGRESS', 'TRIAGED', 'RESOLVED', 'IGNORED'],
+  RESOLVED: ['RESOLVED', 'IN_PROGRESS'],
+  IGNORED: ['IGNORED', 'NEW'],
+};
 
 async function ensureCsrf() {
   if (csrf) return csrf;
@@ -140,12 +155,97 @@ async function loadAudit() {
   });
 }
 
+function percent(value) {
+  return Number.isFinite(Number(value)) ? `${(Number(value) * 100).toFixed(1)}%` : '—';
+}
+
+async function loadBadCaseMetrics() {
+  const metrics = await api('/admin/bad-cases/metrics?days=30');
+  document.getElementById('metricResponses').textContent = metrics.responseCount;
+  document.getElementById('metricFeedback').textContent = metrics.feedbackCount;
+  document.getElementById('metricParticipation').textContent = percent(metrics.participationRate);
+  document.getElementById('metricDownRate').textContent = percent(metrics.downRate);
+  document.getElementById('metricResolved').textContent = metrics.resolvedCount;
+}
+
+function reasonText(reasons) {
+  if (!reasons?.length) return '未填写';
+  return reasons.map((reason) => BAD_CASE_REASONS[reason] || reason).join('、');
+}
+
+async function loadBadCases() {
+  const query = new URLSearchParams();
+  const status = document.getElementById('badCaseStatusFilter').value;
+  const reason = document.getElementById('badCaseReasonFilter').value;
+  const strategy = document.getElementById('badCaseStrategyFilter').value.trim();
+  const modelName = document.getElementById('badCaseModelFilter').value.trim();
+  const agentVersion = document.getElementById('badCaseVersionFilter').value.trim();
+  const from = document.getElementById('badCaseFromFilter').value;
+  const to = document.getElementById('badCaseToFilter').value;
+  if (status) query.set('status', status);
+  if (reason) query.set('reason', reason);
+  if (strategy) query.set('strategy', strategy);
+  if (modelName) query.set('modelName', modelName);
+  if (agentVersion) query.set('agentVersion', agentVersion);
+  if (from) query.set('from', from);
+  if (to) query.set('to', to);
+  const rows = await api(`/admin/bad-cases?${query}`);
+  const tbody = document.getElementById('badCaseRows');
+  tbody.replaceChildren();
+  rows.forEach((item) => {
+    const tr = document.createElement('tr');
+    [date(item.updatedAt), item.status, item.priority, reasonText(item.reasons),
+      `${text(item.planStrategy)} / ${text(item.modelName)}`, text(item.ownerUsername)].forEach((value) => {
+      const td = document.createElement('td'); td.textContent = value; tr.appendChild(td);
+    });
+    const actions = document.createElement('td');
+    actions.append(button('查看', () => openBadCase(item.id)));
+    tr.appendChild(actions); tbody.appendChild(tr);
+  });
+  if (!rows.length) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td'); td.colSpan = 7; td.className = 'empty-table'; td.textContent = '暂无数据';
+    tr.appendChild(td); tbody.appendChild(tr);
+  }
+}
+
+function populateBadCaseStatus(current) {
+  const select = document.getElementById('badCaseStatus');
+  select.replaceChildren();
+  (BAD_CASE_TRANSITIONS[current] || [current]).forEach((status) => {
+    const option = document.createElement('option'); option.value = status; option.textContent = status;
+    option.selected = status === current; select.appendChild(option);
+  });
+}
+
+async function openBadCase(id) {
+  selectedBadCase = await api(`/admin/bad-cases/${id}`);
+  document.getElementById('badCaseId').textContent = `#${selectedBadCase.id}`;
+  document.getElementById('badCaseMeta').textContent = [selectedBadCase.priority, selectedBadCase.planStrategy,
+    selectedBadCase.modelName, date(selectedBadCase.createdAt)].filter(Boolean).join(' · ');
+  document.getElementById('badCaseQuery').textContent = text(selectedBadCase.query);
+  document.getElementById('badCaseAnswer').textContent = text(selectedBadCase.answer);
+  document.getElementById('badCaseToolSummary').textContent = text(selectedBadCase.toolSummary);
+  document.getElementById('badCaseFeedback').textContent = [reasonText(selectedBadCase.reasons),
+    selectedBadCase.comment].filter(Boolean).join(' · ');
+  populateBadCaseStatus(selectedBadCase.status);
+  document.getElementById('badCaseCategory').value = selectedBadCase.category || '';
+  document.getElementById('badCaseOwner').value = selectedBadCase.ownerUsername || '';
+  document.getElementById('badCaseFixVersion').value = selectedBadCase.fixVersion || '';
+  document.getElementById('badCaseRootCause').value = selectedBadCase.rootCause || '';
+  document.getElementById('badCaseResolution').value = selectedBadCase.resolution || '';
+  document.getElementById('copyTrace').disabled = !selectedBadCase.traceId;
+  document.getElementById('badCaseDialogNotice').textContent = '';
+  document.getElementById('badCaseDialog').showModal();
+}
+
 document.querySelectorAll('.tab').forEach((tab) => tab.addEventListener('click', () => {
   document.querySelectorAll('.tab').forEach((item) => item.classList.toggle('active', item === tab));
-  ['users', 'tokens', 'audit'].forEach((name) => {
+  ['users', 'tokens', 'badCases', 'audit'].forEach((name) => {
     document.getElementById(`${name}Panel`).classList.toggle('hidden', tab.dataset.tab !== name);
   });
   if (tab.dataset.tab === 'tokens') loadTokens().catch(showError);
+  if (tab.dataset.tab === 'badCases') Promise.all([loadBadCases(), loadBadCaseMetrics()]).catch(showError);
   if (tab.dataset.tab === 'audit') loadAudit().catch(showError);
 }));
 
@@ -207,6 +307,35 @@ document.getElementById('createTokenForm').addEventListener('submit', async (eve
 });
 document.getElementById('copyToken').addEventListener('click', async () => navigator.clipboard.writeText(document.getElementById('rawToken').textContent));
 document.getElementById('refreshAudit').addEventListener('click', () => loadAudit().catch(showError));
+document.getElementById('refreshBadCases').addEventListener('click', () => Promise.all([
+  loadBadCases(), loadBadCaseMetrics(),
+]).catch(showError));
+document.getElementById('badCaseFilters').addEventListener('submit', (event) => {
+  event.preventDefault(); loadBadCases().catch(showError);
+});
+document.getElementById('closeBadCase').addEventListener('click', () => document.getElementById('badCaseDialog').close());
+document.getElementById('copyTrace').addEventListener('click', async () => {
+  if (selectedBadCase?.traceId) await navigator.clipboard.writeText(selectedBadCase.traceId);
+  document.getElementById('badCaseDialogNotice').textContent = 'Trace ID 已复制';
+});
+document.getElementById('badCaseForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try {
+    selectedBadCase = await api(`/admin/bad-cases/${selectedBadCase.id}`, {
+      method: 'POST', body: JSON.stringify({
+        status: document.getElementById('badCaseStatus').value,
+        category: document.getElementById('badCaseCategory').value.trim(),
+        ownerUsername: document.getElementById('badCaseOwner').value.trim(),
+        rootCause: document.getElementById('badCaseRootCause').value.trim(),
+        resolution: document.getElementById('badCaseResolution').value.trim(),
+        fixVersion: document.getElementById('badCaseFixVersion').value.trim(),
+      }),
+    });
+    document.getElementById('badCaseDialog').close();
+    document.getElementById('badCaseNotice').textContent = `Bad Case #${selectedBadCase.id} 已更新`;
+    await Promise.all([loadBadCases(), loadBadCaseMetrics()]);
+  } catch (error) { document.getElementById('badCaseDialogNotice').textContent = error.message; }
+});
 document.getElementById('logoutButton').addEventListener('click', async () => {
   await api('/auth/logout', { method: 'POST' }); window.location.replace('/login.html');
 });
