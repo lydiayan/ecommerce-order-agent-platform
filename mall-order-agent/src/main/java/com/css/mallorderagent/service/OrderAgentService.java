@@ -112,6 +112,7 @@ public class OrderAgentService {
             }
             trace.attribute("grounded", response.isGrounded());
             trace.attribute("planStrategy", response.getPlanStrategy());
+            addIntentTraceAttributes(trace, response);
             trace.attribute("interrupted", response.isInterrupted());
             trace.attribute("responseLength", response.getAnswer() != null ? response.getAnswer().length() : 0);
             return response;
@@ -139,6 +140,7 @@ public class OrderAgentService {
             response.setTraceId(trace.traceId());
             trace.attribute("grounded", response.isGrounded());
             trace.attribute("planStrategy", response.getPlanStrategy());
+            addIntentTraceAttributes(trace, response);
             trace.attribute("interrupted", response.isInterrupted());
             trace.attribute("responseLength", response.getAnswer() != null ? response.getAnswer().length() : 0);
             return response;
@@ -253,6 +255,11 @@ public class OrderAgentService {
         response.setAnswer(answer);
         response.setGrounded(grounded);
         response.setPlanStrategy(planStrategy);
+        response.setIntent(state.value(AgentGraphKeys.INTENT, ""));
+        response.setIntentSource(state.value(AgentGraphKeys.INTENT_SOURCE, ""));
+        response.setIntentConfidence(state.value(AgentGraphKeys.INTENT_CONFIDENCE, 0D));
+        response.setRuleMatchStatus(state.value(AgentGraphKeys.RULE_MATCH_STATUS, ""));
+        response.setClarificationRequired(state.value(AgentGraphKeys.CLARIFICATION_REQUIRED, false));
         response.setRetrieval(retrieval);
         response.setToolSummary(state.value(AgentGraphKeys.TOOL_RESULT, ""));
         response.setInterrupted(interrupted);
@@ -260,6 +267,16 @@ public class OrderAgentService {
         response.setApprovalReason(state.value(AgentGraphKeys.APPROVAL_REASON, ""));
         response.setOperationLabel(HumanApprovalDetector.resolveOperationLabel(query));
         return response;
+    }
+
+    private static void addIntentTraceAttributes(RagTraceScope trace, OrderAgentResponse response) {
+        trace.attribute("intent", response.getIntent() != null ? response.getIntent() : "");
+        trace.attribute("intentSource",
+                response.getIntentSource() != null ? response.getIntentSource() : "");
+        trace.attribute("intentConfidence", response.getIntentConfidence());
+        trace.attribute("ruleMatchStatus",
+                response.getRuleMatchStatus() != null ? response.getRuleMatchStatus() : "");
+        trace.attribute("clarificationRequired", response.isClarificationRequired());
     }
 
     private OrderAgentResponse handlePendingConfirmationReply(AskRequest request, String userId,

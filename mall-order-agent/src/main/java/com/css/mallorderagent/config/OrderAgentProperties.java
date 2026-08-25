@@ -21,6 +21,9 @@ public class OrderAgentProperties {
     @NestedConfigurationProperty
     private StreamingProperties streaming = new StreamingProperties();
 
+    @NestedConfigurationProperty
+    private IntentProperties intent = new IntentProperties();
+
     public ConversationProperties getConversation() {
         return conversation;
     }
@@ -51,6 +54,58 @@ public class OrderAgentProperties {
 
     public void setStreaming(StreamingProperties streaming) {
         this.streaming = streaming != null ? streaming : new StreamingProperties();
+    }
+
+    public IntentProperties getIntent() {
+        return intent;
+    }
+
+    public void setIntent(IntentProperties intent) {
+        this.intent = intent != null ? intent : new IntentProperties();
+    }
+
+    public static class IntentProperties {
+
+        /** 规则不确定时是否允许调用轻量模型。 */
+        private boolean llmEnabled = true;
+
+        private String model = "qwen-turbo";
+
+        private double confidenceThreshold = 0.8D;
+
+        private int maxQueryLength = 2_000;
+
+        public boolean isLlmEnabled() {
+            return llmEnabled;
+        }
+
+        public void setLlmEnabled(boolean llmEnabled) {
+            this.llmEnabled = llmEnabled;
+        }
+
+        public String getModel() {
+            return model;
+        }
+
+        public void setModel(String model) {
+            this.model = model;
+        }
+
+        public double getConfidenceThreshold() {
+            return Math.max(0D, Math.min(confidenceThreshold, 1D));
+        }
+
+        public void setConfidenceThreshold(double confidenceThreshold) {
+            this.confidenceThreshold = confidenceThreshold;
+        }
+
+        public int getMaxQueryLength() {
+            return Math.max(1, maxQueryLength);
+        }
+
+        public void setMaxQueryLength(int maxQueryLength) {
+            this.maxQueryLength = maxQueryLength;
+        }
     }
 
     public static class StreamingProperties {

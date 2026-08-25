@@ -31,6 +31,11 @@ public final class AgentGraphKeys {
 
     public static final String PLAN = "plan";
     public static final String PLAN_STRATEGY = "planStrategy";
+    public static final String INTENT = "intent";
+    public static final String INTENT_SOURCE = "intentSource";
+    public static final String INTENT_CONFIDENCE = "intentConfidence";
+    public static final String RULE_MATCH_STATUS = "ruleMatchStatus";
+    public static final String CLARIFICATION_REQUIRED = "clarificationRequired";
     public static final String BUILT_PROMPT = "builtPrompt";
 
     public static final String TOOL_RESULT = "toolResult";

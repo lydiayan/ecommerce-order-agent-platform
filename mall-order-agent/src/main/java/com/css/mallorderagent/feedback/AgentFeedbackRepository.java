@@ -21,12 +21,15 @@ public class AgentFeedbackRepository {
         jdbcTemplate.update("""
                 INSERT INTO agent_response_snapshot(
                     response_id, app_user_id, actor_user_fingerprint, trace_id, plan_strategy,
+                    intent, intent_source, intent_confidence, rule_match_status, clarification_required,
                     model_name, agent_version, grounded, interrupted, query_ciphertext,
                     answer_ciphertext, conversation_ciphertext, tool_summary_ciphertext,
                     operation_ciphertext, expires_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, row.responseId(), row.appUserId(), row.actorUserFingerprint(), row.traceId(),
-                row.planStrategy(), row.modelName(), row.agentVersion(), row.grounded(), row.interrupted(),
+                row.planStrategy(), row.intent(), row.intentSource(), row.intentConfidence(),
+                row.ruleMatchStatus(), row.clarificationRequired(), row.modelName(), row.agentVersion(),
+                row.grounded(), row.interrupted(),
                 row.queryCiphertext(), row.answerCiphertext(), row.conversationCiphertext(),
                 row.toolSummaryCiphertext(), row.operationCiphertext(), Timestamp.valueOf(row.expiresAt()));
     }
@@ -39,12 +42,29 @@ public class AgentFeedbackRepository {
         return count != null && count > 0;
     }
 
+    public String findTraceId(String responseId) {
+        return jdbcTemplate.query("SELECT trace_id FROM agent_response_snapshot WHERE response_id = ?",
+                (rs, rowNum) -> rs.getString("trace_id"), responseId).stream().findFirst().orElse(null);
+    }
+
+    public Optional<IntentMetadata> findIntentMetadata(String responseId) {
+        return jdbcTemplate.query("""
+                SELECT intent, intent_source, intent_confidence, rule_match_status,
+                       clarification_required
+                FROM agent_response_snapshot WHERE response_id = ?
+                """, (rs, rowNum) -> new IntentMetadata(
+                rs.getString("intent"), rs.getString("intent_source"),
+                rs.getObject("intent_confidence", Double.class),
+                rs.getString("rule_match_status"), rs.getBoolean("clarification_required")),
+                responseId).stream().findFirst();
+    }
+
     public Optional<FeedbackRow> findFeedback(String responseId, long appUserId) {
         return jdbcTemplate.query("""
-                SELECT id, rating, reasons_json, comment_ciphertext, updated_at
+                SELECT id, version, rating, reasons_json, comment_ciphertext, updated_at
                 FROM agent_response_feedback WHERE response_id = ? AND app_user_id = ?
                 """, (rs, rowNum) -> new FeedbackRow(
-                rs.getLong("id"), rs.getString("rating"), rs.getString("reasons_json"),
+                rs.getLong("id"), rs.getLong("version"), rs.getString("rating"), rs.getString("reasons_json"),
                 rs.getString("comment_ciphertext"), toLocalDateTime(rs.getTimestamp("updated_at"))),
                 responseId, appUserId).stream().findFirst();
     }
@@ -53,11 +73,12 @@ public class AgentFeedbackRepository {
                                       String reasonsJson, String commentCiphertext) {
         jdbcTemplate.update("""
                 INSERT INTO agent_response_feedback(
-                    response_id, app_user_id, rating, reasons_json, comment_ciphertext)
-                VALUES (?, ?, ?, ?, ?)
+                    response_id, app_user_id, version, rating, reasons_json, comment_ciphertext)
+                VALUES (?, ?, 1, ?, ?, ?)
                 ON DUPLICATE KEY UPDATE
                     rating = VALUES(rating), reasons_json = VALUES(reasons_json),
-                    comment_ciphertext = VALUES(comment_ciphertext), updated_at = CURRENT_TIMESTAMP
+                    comment_ciphertext = VALUES(comment_ciphertext), version = version + 1,
+                    updated_at = CURRENT_TIMESTAMP
                 """, responseId, appUserId, rating, reasonsJson, commentCiphertext);
         return findFeedback(responseId, appUserId)
                 .orElseThrow(() -> new IllegalStateException("Feedback upsert returned no row"));
@@ -80,18 +101,19 @@ public class AgentFeedbackRepository {
 
     public Optional<BadCaseIdentity> findBadCaseIdentity(String responseId) {
         return jdbcTemplate.query("""
-                SELECT id, status FROM agent_bad_case WHERE response_id = ?
+                SELECT id, version, status FROM agent_bad_case WHERE response_id = ?
                 """, (rs, rowNum) -> new BadCaseIdentity(
-                rs.getLong("id"), rs.getString("status")), responseId).stream().findFirst();
+                rs.getLong("id"), rs.getLong("version"), rs.getString("status")), responseId).stream().findFirst();
     }
 
     public BadCaseIdentity openBadCase(String responseId, String priority) {
         jdbcTemplate.update("""
-                INSERT INTO agent_bad_case(response_id, status, priority, last_feedback_at)
-                VALUES (?, 'NEW', ?, CURRENT_TIMESTAMP)
+                INSERT INTO agent_bad_case(response_id, version, status, priority, last_feedback_at)
+                VALUES (?, 1, 'NEW', ?, CURRENT_TIMESTAMP)
                 ON DUPLICATE KEY UPDATE
                     status = IF(status = 'IGNORED', 'NEW', status),
                     priority = IF(? = 'URGENT', 'URGENT', priority),
+                    version = version + 1,
                     last_feedback_at = CURRENT_TIMESTAMP,
                     updated_at = CURRENT_TIMESTAMP
                 """, responseId, priority, priority);
@@ -105,10 +127,11 @@ public class AgentFeedbackRepository {
             return Optional.empty();
         }
         int changed = jdbcTemplate.update("""
-                UPDATE agent_bad_case SET status = 'IGNORED', updated_at = CURRENT_TIMESTAMP
+                UPDATE agent_bad_case SET status = 'IGNORED', version = version + 1,
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE response_id = ? AND status = 'NEW'
                 """, responseId);
-        return changed > 0 ? current : Optional.empty();
+        return changed > 0 ? findBadCaseIdentity(responseId) : Optional.empty();
     }
 
     public void insertBadCaseHistory(long badCaseId, Long changedByUserId,
@@ -187,7 +210,8 @@ public class AgentFeedbackRepository {
         jdbcTemplate.update("""
                 UPDATE agent_bad_case
                 SET status = ?, category = ?, owner_username = ?, root_cause_ciphertext = ?,
-                    resolution_ciphertext = ?, fix_version = ?, updated_at = CURRENT_TIMESTAMP
+                    resolution_ciphertext = ?, fix_version = ?, version = version + 1,
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """, status, category, ownerUsername, rootCauseCiphertext,
                 resolutionCiphertext, fixVersion, badCaseId);
@@ -239,23 +263,73 @@ public class AgentFeedbackRepository {
                 """);
     }
 
+    public Optional<EvaluationSnapshotRow> findEvaluationSnapshot(String responseId) {
+        return jdbcTemplate.query("""
+                SELECT r.response_id, r.trace_id, r.plan_strategy, r.intent, r.intent_source,
+                       r.intent_confidence, r.rule_match_status, r.clarification_required,
+                       r.model_name, r.agent_version,
+                       r.grounded, r.interrupted, r.query_ciphertext, r.answer_ciphertext,
+                       r.conversation_ciphertext, r.tool_summary_ciphertext, r.operation_ciphertext,
+                       f.rating, f.reasons_json, f.comment_ciphertext,
+                       bc.id AS bad_case_id, bc.status AS bad_case_status, bc.priority AS bad_case_priority
+                FROM agent_response_snapshot r
+                LEFT JOIN agent_response_feedback f ON f.response_id = r.response_id
+                LEFT JOIN agent_bad_case bc ON bc.response_id = r.response_id
+                WHERE r.response_id = ? AND r.expires_at > CURRENT_TIMESTAMP
+                """, (rs, rowNum) -> new EvaluationSnapshotRow(
+                rs.getString("response_id"), rs.getString("trace_id"), rs.getString("plan_strategy"),
+                rs.getString("intent"), rs.getString("intent_source"),
+                rs.getObject("intent_confidence", Double.class), rs.getString("rule_match_status"),
+                rs.getBoolean("clarification_required"), rs.getString("model_name"),
+                rs.getString("agent_version"), rs.getBoolean("grounded"),
+                rs.getBoolean("interrupted"), rs.getString("query_ciphertext"),
+                rs.getString("answer_ciphertext"), rs.getString("conversation_ciphertext"),
+                rs.getString("tool_summary_ciphertext"), rs.getString("operation_ciphertext"),
+                rs.getString("rating"), rs.getString("reasons_json"), rs.getString("comment_ciphertext"),
+                (Long) rs.getObject("bad_case_id"), rs.getString("bad_case_status"),
+                rs.getString("bad_case_priority")), responseId).stream().findFirst();
+    }
+
     private static LocalDateTime toLocalDateTime(Timestamp value) {
         return value != null ? value.toLocalDateTime() : null;
     }
 
     public record ResponseSnapshotInsert(
             String responseId, long appUserId, String actorUserFingerprint, String traceId,
-            String planStrategy, String modelName, String agentVersion, boolean grounded,
-            boolean interrupted, String queryCiphertext, String answerCiphertext,
+            String planStrategy, String intent, String intentSource, Double intentConfidence,
+            String ruleMatchStatus, boolean clarificationRequired, String modelName,
+            String agentVersion, boolean grounded, boolean interrupted,
+            String queryCiphertext, String answerCiphertext,
             String conversationCiphertext, String toolSummaryCiphertext,
             String operationCiphertext, LocalDateTime expiresAt) {
     }
 
-    public record FeedbackRow(long id, String rating, String reasonsJson,
-                              String commentCiphertext, LocalDateTime updatedAt) {
+    public record IntentMetadata(String intent, String intentSource, Double intentConfidence,
+                                 String ruleMatchStatus, boolean clarificationRequired) {
     }
 
-    public record BadCaseIdentity(long id, String status) {
+    public record FeedbackRow(long id, long version, String rating, String reasonsJson,
+                              String commentCiphertext, LocalDateTime updatedAt) {
+        public FeedbackRow(long id, String rating, String reasonsJson,
+                           String commentCiphertext, LocalDateTime updatedAt) {
+            this(id, 0, rating, reasonsJson, commentCiphertext, updatedAt);
+        }
+    }
+
+    public record BadCaseIdentity(long id, long version, String status) {
+        public BadCaseIdentity(long id, String status) {
+            this(id, 0, status);
+        }
+    }
+
+    public record EvaluationSnapshotRow(
+            String responseId, String traceId, String planStrategy, String intent, String intentSource,
+            Double intentConfidence, String ruleMatchStatus, boolean clarificationRequired,
+            String modelName, String agentVersion,
+            boolean grounded, boolean interrupted, String queryCiphertext, String answerCiphertext,
+            String conversationCiphertext, String toolSummaryCiphertext, String operationCiphertext,
+            String rating, String reasonsJson, String commentCiphertext, Long badCaseId,
+            String badCaseStatus, String badCasePriority) {
     }
 
     public record BadCaseListRow(

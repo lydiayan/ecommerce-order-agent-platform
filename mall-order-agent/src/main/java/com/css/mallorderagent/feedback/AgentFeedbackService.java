@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,15 +46,24 @@ public class AgentFeedbackService {
     private final FeedbackSanitizer sanitizer;
     private final FeedbackProperties properties;
     private final ObjectMapper objectMapper;
+    private final FeedbackEventOutboxService eventOutbox;
 
+    @Autowired
     public AgentFeedbackService(AgentFeedbackRepository repository, FeedbackCrypto crypto,
                                 FeedbackSanitizer sanitizer, FeedbackProperties properties,
-                                ObjectMapper objectMapper) {
+                                ObjectMapper objectMapper, FeedbackEventOutboxService eventOutbox) {
         this.repository = repository;
         this.crypto = crypto;
         this.sanitizer = sanitizer;
         this.properties = properties;
         this.objectMapper = objectMapper;
+        this.eventOutbox = eventOutbox;
+    }
+
+    public AgentFeedbackService(AgentFeedbackRepository repository, FeedbackCrypto crypto,
+                                FeedbackSanitizer sanitizer, FeedbackProperties properties,
+                                ObjectMapper objectMapper) {
+        this(repository, crypto, sanitizer, properties, objectMapper, null);
     }
 
     public void registerResponse(OrderAgentResponse response, long appUserId,
@@ -73,6 +83,9 @@ public class AgentFeedbackService {
             repository.insertResponse(new AgentFeedbackRepository.ResponseSnapshotInsert(
                     responseId, appUserId, fingerprint(actorUserId), blankToNull(response.getTraceId()),
                     valueOrDefault(response.getPlanStrategy(), "UNKNOWN"),
+                    blankToNull(response.getIntent()), blankToNull(response.getIntentSource()),
+                    response.getIntentConfidence(), blankToNull(response.getRuleMatchStatus()),
+                    response.isClarificationRequired(),
                     valueOrDefault(properties.getModelName(), "unknown"),
                     valueOrDefault(properties.getAgentVersion(), "unknown"),
                     response.isGrounded(), response.isInterrupted(),
@@ -108,10 +121,16 @@ public class AgentFeedbackService {
                 previous != null ? previous.rating() : null, feedback.rating().name(), reasonsJson);
 
         if (feedback.rating() == FeedbackRating.DOWN) {
-            openBadCase(feedback.responseId(), appUserId, feedback.reasons());
+            AgentFeedbackRepository.BadCaseIdentity badCase = openBadCase(
+                    feedback.responseId(), appUserId, feedback.reasons());
+            appendBadCaseEvent(feedback.responseId(), badCase, feedback.reasons(), "DOWN");
         } else {
-            ignoreUntriagedBadCase(feedback.responseId(), appUserId, "feedback changed to UP");
+            ignoreUntriagedBadCase(feedback.responseId(), appUserId, "feedback changed to UP")
+                    .ifPresent(after -> appendBadCaseEvent(feedback.responseId(), after,
+                            List.of(), "UP"));
         }
+        appendFeedbackEvent(feedback.responseId(), saved, feedback.rating().name(), feedback.reasons(),
+                previous == null ? "CREATE" : "UPDATE");
         return toFeedbackView(feedback.responseId(), saved);
     }
 
@@ -126,7 +145,9 @@ public class AgentFeedbackService {
         repository.deleteFeedback(responseId, appUserId);
         repository.insertFeedbackHistory(responseId, appUserId, "CANCEL",
                 previous.rating(), null, previous.reasonsJson());
-        ignoreUntriagedBadCase(responseId, appUserId, "feedback cancelled");
+        ignoreUntriagedBadCase(responseId, appUserId, "feedback cancelled")
+                .ifPresent(after -> appendBadCaseEvent(responseId, after, List.of(), "CANCEL"));
+        appendFeedbackEvent(responseId, previous, null, List.of(), "CANCEL");
         return new FeedbackView(responseId, null, List.of(), null, null);
     }
 
@@ -137,6 +158,21 @@ public class AgentFeedbackService {
         return repository.findFeedback(responseId, appUserId)
                 .map(row -> toFeedbackView(responseId, row))
                 .orElseGet(() -> new FeedbackView(responseId, null, List.of(), null, null));
+    }
+
+    @Transactional(readOnly = true)
+    public EvaluationSnapshotView evaluationSnapshot(String rawResponseId) {
+        String responseId = validateResponseId(rawResponseId);
+        AgentFeedbackRepository.EvaluationSnapshotRow row = repository.findEvaluationSnapshot(responseId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "回答不存在或已过期"));
+        return new EvaluationSnapshotView(
+                row.responseId(), row.traceId(), row.planStrategy(), row.intent(), row.intentSource(),
+                row.intentConfidence(), row.ruleMatchStatus(), row.clarificationRequired(),
+                row.modelName(), row.agentVersion(),
+                row.grounded(), row.interrupted(), decrypt(row.queryCiphertext()), decrypt(row.answerCiphertext()),
+                decrypt(row.conversationCiphertext()), decrypt(row.toolSummaryCiphertext()),
+                decrypt(row.operationCiphertext()), row.rating(), readReasons(row.reasonsJson()),
+                decrypt(row.commentCiphertext()), row.badCaseId(), row.badCaseStatus(), row.badCasePriority());
     }
 
     @Transactional(readOnly = true)
@@ -205,6 +241,9 @@ public class AgentFeedbackService {
             repository.insertBadCaseHistory(badCaseId, adminUserId, fromStatus.name(), toStatus.name(),
                     crypto.encrypt("status updated by administrator"));
         }
+        AgentFeedbackRepository.BadCaseIdentity after = repository.findBadCaseIdentity(current.responseId())
+                .orElse(new AgentFeedbackRepository.BadCaseIdentity(badCaseId, 0L, toStatus.name()));
+        appendBadCaseEvent(current.responseId(), after, List.of(), "ADMIN_UPDATE");
         return findBadCase(badCaseId);
     }
 
@@ -233,7 +272,8 @@ public class AgentFeedbackService {
         if (total > 0) log.info("Purged {} expired agent feedback snapshots", total);
     }
 
-    private void openBadCase(String responseId, long appUserId, List<FeedbackReason> reasons) {
+    private AgentFeedbackRepository.BadCaseIdentity openBadCase(String responseId, long appUserId,
+                                                                 List<FeedbackReason> reasons) {
         boolean urgent = reasons.contains(FeedbackReason.SAFETY_RISK)
                 || reasons.contains(FeedbackReason.TOOL_FAILURE);
         AgentFeedbackRepository.BadCaseIdentity before = repository
@@ -249,12 +289,57 @@ public class AgentFeedbackService {
             log.error("URGENT_AGENT_BAD_CASE badCaseId={}, responseId={}, reasons={}",
                     current.id(), responseId, reasons);
         }
+        return current;
     }
 
-    private void ignoreUntriagedBadCase(String responseId, long appUserId, String details) {
-        repository.ignoreNewBadCase(responseId).ifPresent(current ->
+    private java.util.Optional<AgentFeedbackRepository.BadCaseIdentity> ignoreUntriagedBadCase(
+            String responseId, long appUserId, String details) {
+        return repository.ignoreNewBadCase(responseId).map(current -> {
                 repository.insertBadCaseHistory(current.id(), appUserId,
-                        BadCaseStatus.NEW.name(), BadCaseStatus.IGNORED.name(), crypto.encrypt(details)));
+                        BadCaseStatus.NEW.name(), BadCaseStatus.IGNORED.name(), crypto.encrypt(details));
+                return current;
+        });
+    }
+
+    private void appendFeedbackEvent(String responseId, AgentFeedbackRepository.FeedbackRow saved,
+                                     String rating, List<FeedbackReason> reasons, String action) {
+        if (eventOutbox == null) return;
+        Map<String, Object> payload = new java.util.LinkedHashMap<>();
+        payload.put("responseId", responseId);
+        if (rating != null) payload.put("rating", rating);
+        payload.put("reasons", reasons.stream().map(Enum::name).toList());
+        payload.put("action", action);
+        appendIntentMetadata(payload, responseId);
+        eventOutbox.append("FeedbackChanged", responseId, Math.max(1, saved.version()),
+                repository.findTraceId(responseId), payload);
+    }
+
+    private void appendBadCaseEvent(String responseId, AgentFeedbackRepository.BadCaseIdentity badCase,
+                                     List<FeedbackReason> reasons, String action) {
+        if (eventOutbox == null || badCase == null) return;
+        Map<String, Object> payload = new java.util.LinkedHashMap<>();
+        payload.put("responseId", responseId);
+        payload.put("badCaseId", badCase.id());
+        payload.put("status", badCase.status());
+        payload.put("reasons", reasons.stream().map(Enum::name).toList());
+        payload.put("action", action);
+        appendIntentMetadata(payload, responseId);
+        eventOutbox.append("BadCaseChanged", String.valueOf(badCase.id()), Math.max(1, badCase.version()),
+                repository.findTraceId(responseId), payload);
+    }
+
+    private void appendIntentMetadata(Map<String, Object> payload, String responseId) {
+        repository.findIntentMetadata(responseId).ifPresent(metadata -> {
+            if (metadata.intent() != null) payload.put("intent", metadata.intent());
+            if (metadata.intentSource() != null) payload.put("intentSource", metadata.intentSource());
+            if (metadata.intentConfidence() != null) {
+                payload.put("intentConfidence", metadata.intentConfidence());
+            }
+            if (metadata.ruleMatchStatus() != null) {
+                payload.put("ruleMatchStatus", metadata.ruleMatchStatus());
+            }
+            payload.put("clarificationRequired", metadata.clarificationRequired());
+        });
     }
 
     private FeedbackView toFeedbackView(String responseId, AgentFeedbackRepository.FeedbackRow row) {
@@ -384,6 +469,14 @@ public class AgentFeedbackService {
 
     public record FeedbackView(String responseId, String rating, List<String> reasons,
                                String comment, LocalDateTime updatedAt) { }
+
+    public record EvaluationSnapshotView(
+            String responseId, String traceId, String planStrategy, String intent, String intentSource,
+            Double intentConfidence, String ruleMatchStatus, boolean clarificationRequired,
+            String modelName, String agentVersion,
+            boolean grounded, boolean interrupted, String query, String answer, String conversationId,
+            String toolSummary, String operation, String rating, List<String> reasons, String comment,
+            Long badCaseId, String badCaseStatus, String badCasePriority) { }
 
     public record BadCaseListView(
             long id, String responseId, String status, String priority, String category,

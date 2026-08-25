@@ -77,7 +77,7 @@ public class SecurityConfig {
         http
                 .csrf(config -> config
                         .csrfTokenRepository(csrf)
-                        .ignoringRequestMatchers("/internal/evaluation/**"))
+                        .ignoringRequestMatchers("/internal/evaluation/**", "/internal/feedback/**"))
                 .sessionManagement(session -> {
                     session.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED);
                     session.sessionFixation(fixation -> fixation.migrateSession());
@@ -90,7 +90,8 @@ public class SecurityConfig {
                         .requestMatchers("/auth/csrf", "/agent/order/health", "/vector/milvus/health").permitAll()
                         .requestMatchers("/auth/me", "/auth/change-password", "/auth/logout",
                                 "/auth/impersonation/exit").authenticated()
-                        .requestMatchers("/internal/evaluation/**").hasAuthority("EVALUATION_ACT_AS")
+                        .requestMatchers("/internal/evaluation/**", "/internal/feedback/**")
+                            .hasAuthority("EVALUATION_ACT_AS")
                         .requestMatchers("/admin.html", "/admin.js", "/admin/**").hasRole("ADMIN")
                         .requestMatchers("/vector/milvus/**").hasAuthority("KNOWLEDGE_ADMIN")
                         .requestMatchers("/agent/demo/reset").hasAuthority("DEMO_RESET")

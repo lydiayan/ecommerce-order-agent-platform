@@ -96,12 +96,28 @@ agent:
     core-pool-size: ${AGENT_STREAM_CORE_POOL_SIZE:4}
     max-pool-size: ${AGENT_STREAM_MAX_POOL_SIZE:16}
     queue-capacity: ${AGENT_STREAM_QUEUE_CAPACITY:64}
+  intent:
+    llm-enabled: ${AGENT_INTENT_LLM_ENABLED:true}
+    model: ${AGENT_INTENT_MODEL_NAME:qwen-turbo}
+    confidence-threshold: ${AGENT_INTENT_CONFIDENCE_THRESHOLD:0.80}
+    max-query-length: ${AGENT_INTENT_MAX_QUERY_LENGTH:2000}
   feedback:
     enabled: ${AGENT_FEEDBACK_ENABLED:true}
     retention-days: ${AGENT_FEEDBACK_RETENTION_DAYS:90}
     encryption-key: ${AGENT_FEEDBACK_ENCRYPTION_KEY:local-feedback-key-change-before-production}
     model-name: ${AGENT_MODEL_NAME:qwen-plus}
     agent-version: ${AGENT_VERSION:dev}
+    sync:
+      enabled: ${AGENT_FEEDBACK_SYNC_ENABLED:true}
+      topic: ${AGENT_FEEDBACK_SYNC_TOPIC:agent-feedback-events}
+      tag: ${AGENT_FEEDBACK_SYNC_TAG:feedback}
+      poll-interval-ms: ${AGENT_FEEDBACK_SYNC_POLL_INTERVAL_MS:1000}
+      batch-size: ${AGENT_FEEDBACK_SYNC_BATCH_SIZE:50}
+      max-attempts: ${AGENT_FEEDBACK_SYNC_MAX_ATTEMPTS:8}
+  evaluation:
+    sync:
+      topic: ${AGENT_EVALUATION_SYNC_TOPIC:agent-evaluation-events}
+      tag: ${AGENT_EVALUATION_SYNC_TAG:evaluation}
   graph:
     human-review-enabled: true # 敏感操作人工审核（退货/付款/删除/确认类回复）
   order:

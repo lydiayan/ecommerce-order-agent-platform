@@ -21,7 +21,8 @@ public class ApiTokenAuthenticationFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return !request.getRequestURI().startsWith("/internal/evaluation/");
+        return !(request.getRequestURI().startsWith("/internal/evaluation/")
+                || request.getRequestURI().startsWith("/internal/feedback/"));
     }
 
     @Override

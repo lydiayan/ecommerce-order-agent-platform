@@ -1,5 +1,6 @@
 package com.css.mallorderagent.planner;
 
+import com.css.mallorderagent.config.OrderAgentProperties;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -8,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DefaultPlannerTest {
 
-    private final DefaultPlanner planner = new DefaultPlanner();
+    private final DefaultPlanner planner = plannerReturning(IntentModelDecision.unknown("test_fallback"));
 
     @Test
     void normalRagQuestionDoesNotRequireApproval() {
@@ -109,5 +110,101 @@ class DefaultPlannerTest {
 
         assertFalse(plan.humanApprovalRequired());
         assertEquals("ORDER_QUERY", plan.strategy());
+    }
+
+    @Test
+    void unmatchedQueryUsesModelClassification() {
+        DefaultPlanner modelPlanner = plannerReturning(new IntentModelDecision(
+                IntentType.ORDER_QUERY, 0.93D, false, "semantic_match"));
+
+        PlanResult plan = modelPlanner.plan("看看我最近买的东西");
+
+        assertEquals("ORDER_QUERY", plan.strategy());
+        assertEquals("LLM", plan.intentSource());
+        assertEquals("NO_MATCH", plan.ruleMatchStatus());
+        assertEquals(0.93D, plan.intentConfidence());
+        assertFalse(plan.clarificationRequired());
+    }
+
+    @Test
+    void lowConfidenceModelResultRequestsClarification() {
+        DefaultPlanner modelPlanner = plannerReturning(new IntentModelDecision(
+                IntentType.RAG_QA, 0.62D, false, "weak_match"));
+
+        PlanResult plan = modelPlanner.plan("这个怎么办");
+
+        assertEquals("CLARIFY_INTENT", plan.strategy());
+        assertTrue(plan.actions().isEmpty());
+        assertTrue(plan.clarificationRequired());
+        assertTrue(plan.clarificationMessage().contains("请明确说明"));
+    }
+
+    @Test
+    void ambiguousSensitiveRuleCannotBeDowngradedByModel() {
+        DefaultPlanner modelPlanner = plannerReturning(new IntentModelDecision(
+                IntentType.ORDER_QUERY, 0.96D, false, "order_query"));
+
+        PlanResult plan = modelPlanner.plan("查询订单然后帮我退款");
+
+        assertEquals("CLARIFY_INTENT", plan.strategy());
+        assertEquals("AMBIGUOUS", plan.ruleMatchStatus());
+        assertEquals("sensitive_rule_conflict", plan.classificationFallbackReason());
+        assertTrue(plan.clarificationRequired());
+    }
+
+    @Test
+    void modelSensitiveIntentStillRequiresApproval() {
+        DefaultPlanner modelPlanner = plannerReturning(new IntentModelDecision(
+                IntentType.SENSITIVE_ORDER_OPERATION, 0.91D, false, "semantic_action"));
+
+        PlanResult plan = modelPlanner.plan("查询订单然后帮我退款");
+
+        assertEquals("DANGEROUS_ORDER_OP", plan.strategy());
+        assertTrue(plan.humanApprovalRequired());
+    }
+
+    @Test
+    void modelCannotInventUnspecifiedSensitiveOperation() {
+        DefaultPlanner modelPlanner = plannerReturning(new IntentModelDecision(
+                IntentType.SENSITIVE_ORDER_OPERATION, 0.94D, false, "semantic_action"));
+
+        PlanResult plan = modelPlanner.plan("把刚才那笔处理掉");
+
+        assertEquals("CLARIFY_INTENT", plan.strategy());
+        assertEquals("sensitive_operation_unspecified", plan.classificationFallbackReason());
+    }
+
+    @Test
+    void negatedSensitiveIntentAlwaysRequestsClarification() {
+        DefaultPlanner modelPlanner = plannerReturning(new IntentModelDecision(
+                IntentType.SENSITIVE_ORDER_OPERATION, 0.99D, false, "semantic_action"));
+
+        PlanResult plan = modelPlanner.plan("不要取消订单");
+
+        assertEquals("CLARIFY_INTENT", plan.strategy());
+        assertEquals("negated_sensitive_intent", plan.classificationFallbackReason());
+    }
+
+    @Test
+    void clearRuleDoesNotInvokeModel() {
+        DefaultPlanner modelPlanner = new DefaultPlanner(query -> {
+            throw new AssertionError("model should not be called");
+        }, properties());
+
+        PlanResult plan = modelPlanner.plan("查询我的订单");
+
+        assertEquals("RULE", plan.intentSource());
+        assertEquals("MATCH", plan.ruleMatchStatus());
+    }
+
+    private static DefaultPlanner plannerReturning(IntentModelDecision decision) {
+        return new DefaultPlanner(query -> decision, properties());
+    }
+
+    private static OrderAgentProperties properties() {
+        OrderAgentProperties properties = new OrderAgentProperties();
+        properties.getIntent().setLlmEnabled(true);
+        properties.getIntent().setConfidenceThreshold(0.8D);
+        return properties;
     }
 }

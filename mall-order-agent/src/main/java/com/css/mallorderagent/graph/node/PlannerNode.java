@@ -55,9 +55,11 @@ public class PlannerNode implements NodeAction {
                 String denial = capabilityDenial(state, plan, query);
                 if (denial != null) {
                     PlanResult denied = new PlanResult("CAPABILITY_DENIED", List.of());
+                    copyClassification(plan, denied);
                     Map<String, Object> updates = resetTurnOutputs(query);
                     updates.put(AgentGraphKeys.PLAN, denied);
                     updates.put(AgentGraphKeys.PLAN_STRATEGY, denied.strategy());
+                    putClassification(updates, denied);
                     updates.put(AgentGraphKeys.ANSWER, denial);
                     return updates;
                 }
@@ -69,8 +71,18 @@ public class PlannerNode implements NodeAction {
                 plannerSpan.attribute("actionCount", actions.size());
                 plannerSpan.attribute("actions", actions);
                 plannerSpan.attribute("humanApprovalRequired", plan.humanApprovalRequired());
+                plannerSpan.attribute("intent", valueOrEmpty(plan.intent()));
+                plannerSpan.attribute("intentSource", valueOrEmpty(plan.intentSource()));
+                plannerSpan.attribute("intentConfidence", plan.intentConfidence());
+                plannerSpan.attribute("ruleMatchStatus", valueOrEmpty(plan.ruleMatchStatus()));
+                plannerSpan.attribute("clarificationRequired", plan.clarificationRequired());
                 if (plan.approvalReason() != null && !plan.approvalReason().isBlank()) {
                     plannerSpan.attribute("approvalReason", plan.approvalReason());
+                }
+                if (plan.classificationFallbackReason() != null
+                        && !plan.classificationFallbackReason().isBlank()) {
+                    plannerSpan.attribute("classificationFallbackReason",
+                            plan.classificationFallbackReason());
                 }
 
                 log.info("PlannerNode completed, strategy={}, actions={}, humanApproval={}",
@@ -79,9 +91,13 @@ public class PlannerNode implements NodeAction {
                 Map<String, Object> updates = resetTurnOutputs(query);
                 updates.put(AgentGraphKeys.PLAN, plan);
                 updates.put(AgentGraphKeys.PLAN_STRATEGY, plan.strategy());
+                putClassification(updates, plan);
                 updates.put(AgentGraphKeys.HUMAN_APPROVAL_REQUIRED, plan.humanApprovalRequired());
                 updates.put(AgentGraphKeys.APPROVAL_REASON,
                         plan.approvalReason() != null ? plan.approvalReason() : "");
+                if (plan.clarificationRequired() && plan.clarificationMessage() != null) {
+                    updates.put(AgentGraphKeys.ANSWER, plan.clarificationMessage());
+                }
                 return updates;
             } catch (RuntimeException e) {
                 plannerSpan.error(e);
@@ -104,7 +120,33 @@ public class PlannerNode implements NodeAction {
         updates.put(AgentGraphKeys.NEXT_NODE, "");
         updates.put(AgentGraphKeys.HUMAN_APPROVAL_REQUIRED, false);
         updates.put(AgentGraphKeys.APPROVAL_REASON, "");
+        updates.put(AgentGraphKeys.INTENT, "");
+        updates.put(AgentGraphKeys.INTENT_SOURCE, "");
+        updates.put(AgentGraphKeys.INTENT_CONFIDENCE, 0D);
+        updates.put(AgentGraphKeys.RULE_MATCH_STATUS, "");
+        updates.put(AgentGraphKeys.CLARIFICATION_REQUIRED, false);
         return updates;
+    }
+
+    private static void putClassification(Map<String, Object> updates, PlanResult plan) {
+        updates.put(AgentGraphKeys.INTENT, valueOrEmpty(plan.intent()));
+        updates.put(AgentGraphKeys.INTENT_SOURCE, valueOrEmpty(plan.intentSource()));
+        updates.put(AgentGraphKeys.INTENT_CONFIDENCE, plan.intentConfidence());
+        updates.put(AgentGraphKeys.RULE_MATCH_STATUS, valueOrEmpty(plan.ruleMatchStatus()));
+        updates.put(AgentGraphKeys.CLARIFICATION_REQUIRED, plan.clarificationRequired());
+    }
+
+    private static void copyClassification(PlanResult source, PlanResult target) {
+        target.setIntent(source.intent());
+        target.setIntentSource(source.intentSource());
+        target.setIntentConfidence(source.intentConfidence());
+        target.setRuleMatchStatus(source.ruleMatchStatus());
+        target.setClarificationRequired(source.clarificationRequired());
+        target.setClassificationFallbackReason(source.classificationFallbackReason());
+    }
+
+    private static String valueOrEmpty(String value) {
+        return value != null ? value : "";
     }
 
     private static String capabilityDenial(OverAllState state, PlanResult plan, String query) {

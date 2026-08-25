@@ -17,6 +17,11 @@ public class OrderAgentResponse {
     private String conversationId;
     /** Planner 选定的策略，如 RAG_QA */
     private String planStrategy;
+    private String intent;
+    private String intentSource;
+    private double intentConfidence;
+    private String ruleMatchStatus;
+    private boolean clarificationRequired;
     private SearchResponse retrieval;
 
     /** Internal diagnostic snapshot; never returned to end users. */
@@ -110,6 +115,46 @@ public class OrderAgentResponse {
 
     public void setPlanStrategy(String planStrategy) {
         this.planStrategy = planStrategy;
+    }
+
+    public String getIntent() {
+        return intent;
+    }
+
+    public void setIntent(String intent) {
+        this.intent = intent;
+    }
+
+    public String getIntentSource() {
+        return intentSource;
+    }
+
+    public void setIntentSource(String intentSource) {
+        this.intentSource = intentSource;
+    }
+
+    public double getIntentConfidence() {
+        return intentConfidence;
+    }
+
+    public void setIntentConfidence(double intentConfidence) {
+        this.intentConfidence = intentConfidence;
+    }
+
+    public String getRuleMatchStatus() {
+        return ruleMatchStatus;
+    }
+
+    public void setRuleMatchStatus(String ruleMatchStatus) {
+        this.ruleMatchStatus = ruleMatchStatus;
+    }
+
+    public boolean isClarificationRequired() {
+        return clarificationRequired;
+    }
+
+    public void setClarificationRequired(boolean clarificationRequired) {
+        this.clarificationRequired = clarificationRequired;
     }
 
     public SearchResponse getRetrieval() {

@@ -14,6 +14,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -32,6 +33,9 @@ class AgentFeedbackServiceTest {
 
     @Mock
     private AgentFeedbackRepository repository;
+
+    @Mock
+    private FeedbackEventOutboxService eventOutbox;
 
     private FeedbackCrypto crypto;
     private AgentFeedbackService service;
@@ -64,6 +68,9 @@ class AgentFeedbackServiceTest {
         AgentFeedbackRepository.ResponseSnapshotInsert saved = captor.getValue();
         assertEquals("test-version", saved.agentVersion());
         assertEquals("test-model", saved.modelName());
+        assertEquals("RAG_QA", saved.intent());
+        assertEquals("RULE", saved.intentSource());
+        assertEquals(0.95D, saved.intentConfidence());
         assertTrue(crypto.decrypt(saved.queryCiphertext()).contains("[PHONE]"));
         assertTrue(crypto.decrypt(saved.queryCiphertext()).contains("[REDACTED]"));
         assertFalse(saved.answerCiphertext().contains(response.getAnswer()));
@@ -150,6 +157,53 @@ class AgentFeedbackServiceTest {
         verify(repository, never()).upsertFeedback(any(), eq(7L), any(), any(), any());
     }
 
+    @Test
+    void submitDown_syncsIntentMetadataToAgentInsightEvents() {
+        AgentFeedbackService syncedService = new AgentFeedbackService(
+                repository, crypto, new FeedbackSanitizer(), feedbackProperties(),
+                new ObjectMapper(), eventOutbox);
+        String responseId = "79713549-9e35-4140-8e87-1fd7ac72c387";
+        when(repository.responseOwnedBy(responseId, 7L)).thenReturn(true);
+        when(repository.findFeedback(responseId, 7L)).thenReturn(Optional.empty());
+        when(repository.upsertFeedback(eq(responseId), eq(7L), eq("DOWN"), any(), any()))
+                .thenReturn(new AgentFeedbackRepository.FeedbackRow(
+                        12L, "DOWN", "[]", null, LocalDateTime.now()));
+        when(repository.findBadCaseIdentity(responseId)).thenReturn(Optional.empty());
+        when(repository.openBadCase(responseId, "NORMAL"))
+                .thenReturn(new AgentFeedbackRepository.BadCaseIdentity(21L, "NEW"));
+        when(repository.findTraceId(responseId)).thenReturn("trace-1");
+        when(repository.findIntentMetadata(responseId)).thenReturn(Optional.of(
+                new AgentFeedbackRepository.IntentMetadata(
+                        "ORDER_QUERY", "LLM", 0.91D, "NO_MATCH", false)));
+
+        syncedService.submit(new AgentFeedbackRequest(
+                responseId, "DOWN", List.of(), "意图识别错误"), 7L);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> feedbackPayload = ArgumentCaptor.forClass(Map.class);
+        verify(eventOutbox).append(eq("FeedbackChanged"), eq(responseId), eq(1L),
+                eq("trace-1"), feedbackPayload.capture());
+        assertEquals("ORDER_QUERY", feedbackPayload.getValue().get("intent"));
+        assertEquals("LLM", feedbackPayload.getValue().get("intentSource"));
+        assertEquals(0.91D, feedbackPayload.getValue().get("intentConfidence"));
+        assertEquals("NO_MATCH", feedbackPayload.getValue().get("ruleMatchStatus"));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> badCasePayload = ArgumentCaptor.forClass(Map.class);
+        verify(eventOutbox).append(eq("BadCaseChanged"), eq("21"), eq(1L),
+                eq("trace-1"), badCasePayload.capture());
+        assertEquals("ORDER_QUERY", badCasePayload.getValue().get("intent"));
+    }
+
+    private static FeedbackProperties feedbackProperties() {
+        FeedbackProperties properties = new FeedbackProperties();
+        properties.setEncryptionKey("0123456789abcdef-feedback-key");
+        properties.setRetentionDays(90);
+        properties.setAgentVersion("test-version");
+        properties.setModelName("test-model");
+        return properties;
+    }
+
     private static OrderAgentResponse response() {
         OrderAgentResponse response = new OrderAgentResponse();
         response.setQuery("订单可以退款吗？");
@@ -157,6 +211,10 @@ class AgentFeedbackServiceTest {
         response.setConversationId("conv-1");
         response.setTraceId("trace-1");
         response.setPlanStrategy("RAG_QA");
+        response.setIntent("RAG_QA");
+        response.setIntentSource("RULE");
+        response.setIntentConfidence(0.95D);
+        response.setRuleMatchStatus("MATCH");
         response.setGrounded(true);
         return response;
     }
