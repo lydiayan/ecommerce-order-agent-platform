@@ -1,5 +1,6 @@
 package com.example.mallordercmpserver.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.example.mallordercmpserver.data.Order;
 import com.example.mallordercmpserver.data.RefundEligibilityResult;
 import org.springframework.ai.tool.annotation.Tool;
@@ -8,7 +9,12 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
@@ -18,13 +24,18 @@ import java.util.List;
 @Service
 public class OpenOrderService {
 
+    private static final Logger log = LoggerFactory.getLogger(OpenOrderService.class);
+
     private final WebClient webClient;
+    private final ObjectMapper objectMapper;
 
     public OpenOrderService(WebClient.Builder webClientBuilder,
-                            @Value("${mall-order.base-url:http://127.0.0.1:8081}") String baseUrl) {
+                            @Value("${mall-order.base-url:http://127.0.0.1:8081}") String baseUrl,
+                            ObjectMapper objectMapper) {
         this.webClient = webClientBuilder
                 .baseUrl(baseUrl)
                 .build();
+        this.objectMapper = objectMapper;
     }
 
     @Tool(description = "根据用户ID获取该用户的订单列表")
@@ -89,15 +100,26 @@ public class OpenOrderService {
         return Boolean.TRUE.equals(result);
     }
 
-    @Tool(description = "为当前用户订单提交退货、退款或换货申请")
-    public String submitAfterSalesRequest(String orderId, String userId, String operationType) {
-        AfterSalesTicket ticket = createAfterSalesTicket(orderId, userId, operationType);
-        return """
-                已成功提交%s申请，当前状态为%s。
-                - 订单号：%s
-                - 工单号：%s
-                后续可在「我的订单」查看进度，客服将在 1 个工作日内处理。
-                """.formatted(ticket.operationType(), ticket.status(), ticket.orderId(), ticket.ticketId()).trim();
+    @Tool(description = "为当前用户订单提交退货、退款或换货申请，返回结构化的成功或业务拒绝结果")
+    public AfterSalesToolResult submitAfterSalesRequest(@ToolParam(description = "订单id")String orderId, String userId, String operationType) {
+        try {
+            AfterSalesTicket ticket = createAfterSalesTicket(orderId, userId, operationType);
+            String message = """
+                    已成功提交%s申请，当前状态为%s。
+                    - 订单号：%s
+                    - 工单号：%s
+                    后续可在「我的订单」查看进度，客服将在 1 个工作日内处理。
+                    """.formatted(ticket.operationType(), ticket.status(), ticket.orderId(), ticket.ticketId()).trim();
+            return AfterSalesToolResult.success(message);
+        } catch (WebClientResponseException exception) {
+            AfterSalesRejectionResponse rejection = parseBusinessRejection(exception);
+            log.warn("mall-order after-sales response status={}, businessRejection={}",
+                    exception.getStatusCode().value(), rejection != null);
+            if (rejection == null) {
+                throw exception;
+            }
+            return AfterSalesToolResult.rejected(rejection);
+        }
     }
 
     @Tool(description = "为当前用户订单提交修改收货地址申请")
@@ -136,6 +158,59 @@ public class OpenOrderService {
 
     private record AfterSalesTicket(String ticketId, String orderId, String userId,
                                     String operationType, String status) {
+    }
+
+    private AfterSalesRejectionResponse parseBusinessRejection(WebClientResponseException exception) {
+        String body = exception.getResponseBodyAsString(StandardCharsets.UTF_8);
+        if (body == null || body.isBlank()) {
+            return null;
+        }
+        try {
+            AfterSalesRejectionResponse response = objectMapper.readValue(body, AfterSalesRejectionResponse.class);
+            return "BUSINESS_REJECTION".equals(response.errorType()) ? response : null;
+        } catch (IOException exceptionDuringParsing) {
+            log.warn("Unable to parse mall-order after-sales error body as business rejection, bodyLength={}",
+                    body.length());
+            return null;
+        }
+    }
+
+    public record AfterSalesToolResult(
+            boolean success,
+            String message,
+            String failureType,
+            String decision,
+            List<String> reasonCodes,
+            List<String> missingFields,
+            String nextAction,
+            String policyVersion) {
+
+        static AfterSalesToolResult success(String message) {
+            return new AfterSalesToolResult(true, message, null, null,
+                    List.of(), List.of(), null, null);
+        }
+
+        static AfterSalesToolResult rejected(AfterSalesRejectionResponse rejection) {
+            return new AfterSalesToolResult(false, rejection.message(), rejection.errorType(),
+                    rejection.decision(), safeList(rejection.reasonCodes()), safeList(rejection.missingFields()),
+                    rejection.nextAction(), rejection.policyVersion());
+        }
+    }
+
+    private record AfterSalesRejectionResponse(
+            String errorType,
+            String code,
+            String message,
+            String decision,
+            String operationType,
+            List<String> reasonCodes,
+            List<String> missingFields,
+            String nextAction,
+            String policyVersion) {
+    }
+
+    private static List<String> safeList(List<String> values) {
+        return values != null ? List.copyOf(values) : List.of();
     }
 
     private static String formatEligibility(RefundEligibilityResult result) {

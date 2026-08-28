@@ -1,6 +1,7 @@
 package com.css.mallorderagent.tool.client;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,12 +36,12 @@ public class OrderMcpToolClient {
         return parseBooleanResult(result);
     }
 
-    public String submitAfterSalesRequest(String orderId, String userId, String operationType) {
+    public AfterSalesToolResult submitAfterSalesRequest(String orderId, String userId, String operationType) {
         Map<String, Object> args = new LinkedHashMap<>();
         args.put("orderId", orderId);
         args.put("userId", userId);
         args.put("operationType", operationType);
-        return unwrapTextResult(invokeTool("submitAfterSalesRequest", args));
+        return parseAfterSalesResult(invokeTool("submitAfterSalesRequest", args));
     }
 
     public String submitAddressChangeRequest(String orderId, String userId) {
@@ -71,9 +72,9 @@ public class OrderMcpToolClient {
     }
 
     String invokeTool(String toolName, Map<String, Object> arguments) {
-        ToolCallback callback = findTool(toolName)
-                .orElseThrow(() -> new OrderMcpToolException("未找到 MCP Tool: " + toolName));
         try {
+            ToolCallback callback = findTool(toolName)
+                    .orElseThrow(() -> new OrderMcpToolException("未找到 MCP Tool: " + toolName));
             String payload = objectMapper.writeValueAsString(arguments);
             log.info("Invoking MCP tool={}, argumentKeys={}", toolName, arguments.keySet());
             return callback.call(payload);
@@ -120,20 +121,80 @@ public class OrderMcpToolClient {
             return "";
         }
         String trimmed = raw.trim();
-        if (trimmed.startsWith("\"") && trimmed.endsWith("\"") && trimmed.length() >= 2) {
-            return trimmed.substring(1, trimmed.length() - 1);
+        if (trimmed.isEmpty()) {
+            return trimmed;
         }
         try {
-            Map<String, Object> map = objectMapper.readValue(trimmed, new TypeReference<>() {
-            });
-            Object text = map.get("text");
-            if (text != null) {
-                return String.valueOf(text).trim();
+            JsonNode node = objectMapper.readTree(trimmed);
+            String extracted = extractText(node);
+            if (extracted != null) {
+                return extracted;
             }
         } catch (Exception ignored) {
             // plain text response
         }
         return trimmed;
+    }
+
+    /**
+     * Spring AI serializes MCP content as an array of content blocks. Handle
+     * that shape as well as the object/string wrappers used by older clients.
+     */
+    private String extractText(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return null;
+        }
+        if (node.isTextual()) {
+            return unwrapTextResult(node.textValue());
+        }
+        if (node.isArray()) {
+            for (JsonNode item : node) {
+                String text = extractText(item);
+                if (text != null) {
+                    return text;
+                }
+            }
+            return null;
+        }
+        if (node.isObject()) {
+            JsonNode text = node.get("text");
+            if (text != null) {
+                return extractText(text);
+            }
+            JsonNode data = node.get("data");
+            if (data != null) {
+                return extractText(data);
+            }
+        }
+        return null;
+    }
+
+    private AfterSalesToolResult parseAfterSalesResult(String raw) {
+        String text = unwrapTextResult(raw);
+        JsonNode resultNode;
+        try {
+            resultNode = objectMapper.readTree(text);
+        } catch (Exception ignored) {
+            return AfterSalesToolResult.legacySuccess(text);
+        }
+        if (resultNode == null || !resultNode.isObject()) {
+            throw new OrderMcpToolException("MCP Tool 返回了无效的售后结果结构");
+        }
+        Map<String, Object> map;
+        try {
+            map = objectMapper.readValue(text, new TypeReference<>() {
+            });
+        } catch (Exception exception) {
+            throw new OrderMcpToolException("MCP Tool 返回了无效的售后结果", exception);
+        }
+        if (map.containsKey("success")) {
+            try {
+                return objectMapper.convertValue(map, AfterSalesToolResult.class);
+            } catch (IllegalArgumentException exception) {
+                throw new OrderMcpToolException("MCP Tool 返回了无效的售后结果", exception);
+            }
+        }
+        throw new OrderMcpToolException("MCP Tool 返回的售后结果缺少 success 字段");
     }
 
     private static void putIfNotNull(Map<String, Object> arguments, String key, Object value) {

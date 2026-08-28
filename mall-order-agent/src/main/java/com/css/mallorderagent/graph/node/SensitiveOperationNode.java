@@ -45,10 +45,13 @@ public class SensitiveOperationNode implements NodeAction {
             try {
                 SensitiveOperationResult result = sensitiveOrderOperationExecutor.execute(state);
                 sensitiveOperationSpan.attribute("resultLength", result.message().length());
-                sensitiveOperationSpan.attribute("grounded", result.success());
+                sensitiveOperationSpan.attribute("grounded", result.grounded());
                 sensitiveOperationSpan.attribute("success", result.success());
-                sensitiveOperationSpan.attribute("executionStatus", result.success() ? "SUCCEEDED" : "FAILED");
+                sensitiveOperationSpan.attribute("executionStatus", result.outcome());
                 sensitiveOperationSpan.attribute("operation", result.operation());
+                if (result.error() != null) {
+                    sensitiveOperationSpan.error(result.error());
+                }
                 if (result.orderId() != null) {
                     sensitiveOperationSpan.attribute("orderFingerprint", TracePrivacy.fingerprint(result.orderId()));
                 }
@@ -60,7 +63,7 @@ public class SensitiveOperationNode implements NodeAction {
                 return Map.of(
                         AgentGraphKeys.ANSWER, result.message(),
                         AgentGraphKeys.TOOL_RESULT, result.message(),
-                        AgentGraphKeys.GROUNDED, result.success());
+                        AgentGraphKeys.GROUNDED, result.grounded());
             } catch (RuntimeException e) {
                 sensitiveOperationSpan.error(e);
                 throw e;

@@ -5,6 +5,7 @@ import com.css.mallorderagent.graph.AgentGraphKeys;
 import com.css.mallorderagent.graph.AgentGraphSupport;
 import com.css.mallorderagent.demo.DemoCapability;
 import com.css.mallorderagent.planner.HumanApprovalDetector;
+import com.css.mallorderagent.tool.client.AfterSalesToolResult;
 import com.css.mallorderagent.tool.client.OrderMcpToolClient;
 import com.css.mallorderagent.tool.client.OrderMcpToolException;
 import com.example.mallorderobservability.trace.TracePrivacy;
@@ -55,20 +56,21 @@ public class SensitiveOrderOperationExecutor {
         log.info("Executing sensitive operation via MCP, operation={}, orderFingerprint={}",
                 operation, TracePrivacy.fingerprint(orderId));
         try {
-            String message = switch (operation) {
-                case "取消订单", "取消" -> executeCancel(orderId, userId);
+            return switch (operation) {
+                case "取消订单", "取消" -> SensitiveOperationResult.success(
+                        operation, orderId, userId, executeCancel(orderId, userId));
                 case "退货" -> executeAfterSales(orderId, userId, "退货");
                 case "退款" -> executeAfterSales(orderId, userId, "退款");
                 case "换货" -> executeAfterSales(orderId, userId, "换货");
-                case "修改收货地址" -> executeAddressChange(orderId, userId);
+                case "修改收货地址" -> SensitiveOperationResult.success(
+                        operation, orderId, userId, executeAddressChange(orderId, userId));
                 default -> executeAfterSales(orderId, userId, operation);
             };
-            return SensitiveOperationResult.success(operation, orderId, userId, message);
         } catch (OrderMcpToolException e) {
             log.error("Sensitive operation failed via MCP, op={}, orderFingerprint={}",
                     operation, TracePrivacy.fingerprint(orderId), e);
-            return SensitiveOperationResult.failure(operation, orderId, userId,
-                    operation + "执行失败：订单 MCP 服务不可用（" + e.getMessage() + "）");
+            return SensitiveOperationResult.technicalFailure(operation, orderId, userId,
+                    operation + "执行失败：订单 MCP 服务暂时不可用，请稍后重试。", e);
         }
     }
 
@@ -80,8 +82,17 @@ public class SensitiveOrderOperationExecutor {
         return "取消订单 " + orderId + " 失败，请确认订单状态是否允许取消。";
     }
 
-    private String executeAfterSales(String orderId, String userId, String operation) {
-        return orderMcpToolClient.submitAfterSalesRequest(orderId, userId, operation);
+    private SensitiveOperationResult executeAfterSales(String orderId, String userId, String operation) {
+        AfterSalesToolResult result = orderMcpToolClient.submitAfterSalesRequest(orderId, userId, operation);
+        if (result.success()) {
+            return SensitiveOperationResult.success(operation, orderId, userId, result.message());
+        }
+        if (!"BUSINESS_REJECTION".equals(result.failureType())) {
+            throw new OrderMcpToolException("MCP Tool 返回了未知的售后失败类型");
+        }
+        String reason = result.message().isBlank() ? "订单暂不符合售后申请条件" : result.message();
+        String message = operation + "申请未提交：" + reason;
+        return SensitiveOperationResult.rejected(operation, orderId, userId, message);
     }
 
     private String executeAddressChange(String orderId, String userId) {

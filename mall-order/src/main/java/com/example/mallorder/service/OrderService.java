@@ -92,10 +92,7 @@ public class OrderService {
         if ("退款".equals(normalizedType) || "退货".equals(normalizedType)) {
             eligibility = refundEligibilityService.evaluate(order, command.toEligibilityCommand());
             if (!eligibility.canSubmitRequest()) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT,
-                        "refund request is not ready: decision=" + eligibility.decision()
-                                + ", reasons=" + eligibility.reasonCodes()
-                                + ", missing=" + eligibility.missingFields());
+                throw new AfterSalesRejectionException(eligibility);
             }
         } else if (!"修改收货地址".equals(normalizedType)
                 && (order.getOrderStatus() == 0 || order.getOrderStatus() == 4)) {
