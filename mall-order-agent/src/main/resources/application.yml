@@ -6,6 +6,11 @@ spring:
   application:
     name: mall-order-agent
 
+  servlet:
+    multipart:
+      max-file-size: ${RAG_PDF_MAX_FILE_SIZE:20MB}
+      max-request-size: ${RAG_PDF_MAX_REQUEST_SIZE:22MB}
+
   config:
     import: classpath:rag.yml
 

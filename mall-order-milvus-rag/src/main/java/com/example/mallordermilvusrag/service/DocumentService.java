@@ -4,6 +4,7 @@ import com.example.mallordermilvusrag.dto.DocumentMetadata;
 import com.example.mallordermilvusrag.splitter.api.RagContentType;
 import com.example.mallordermilvusrag.splitter.api.RagSplitRequest;
 import com.example.mallordermilvusrag.splitter.api.RagSplitStrategy;
+import com.example.mallordermilvusrag.splitter.model.RagChunk;
 import com.example.mallordermilvusrag.splitter.registry.DocumentSplitterRegistry;
 import com.example.mallordermilvusrag.util.PdfTextCleaner;
 import org.slf4j.Logger;
@@ -35,9 +36,20 @@ public class DocumentService {
 
     public List<Document> splitText(String text, DocumentMetadata metadata, String documentId,
                                     RagSplitStrategy strategy, RagContentType contentType) {
+        return splitTextChunks(text, metadata, documentId, strategy, contentType).stream()
+                .map(RagChunk::toDocument)
+                .toList();
+    }
+
+    /**
+     * Splits text without converting or persisting the resulting chunks. This is also used by
+     * the knowledge-base preview endpoint so preview and import always share the same algorithm.
+     */
+    public List<RagChunk> splitTextChunks(String text, DocumentMetadata metadata, String documentId,
+                                          RagSplitStrategy strategy, RagContentType contentType) {
         Map<String, Object> metaMap = metadata != null ? metadata.toMap() : Map.of();
         RagSplitRequest request = new RagSplitRequest(text, metaMap, documentId, strategy, contentType);
-        return splitterRegistry.split(request).stream().map(chunk -> chunk.toDocument()).toList();
+        return splitterRegistry.split(request);
     }
 
     public List<Document> splitTexts(List<DocumentInput> texts) {
@@ -55,6 +67,14 @@ public class DocumentService {
 
     public List<Document> parsePdf(byte[] pdfBytes, String filename, DocumentMetadata metadata,
                                    String documentId, RagSplitStrategy strategy) {
+        return parsePdfChunks(pdfBytes, filename, metadata, documentId, strategy).stream()
+                .map(RagChunk::toDocument)
+                .toList();
+    }
+
+    /** Parses and splits a PDF without writing embeddings or Milvus records. */
+    public List<RagChunk> parsePdfChunks(byte[] pdfBytes, String filename, DocumentMetadata metadata,
+                                         String documentId, RagSplitStrategy strategy) {
         String resolvedFilename = resolveFilename(filename, metadata);
         ByteArrayResource resource = new ByteArrayResource(pdfBytes) {
             @Override
@@ -75,7 +95,7 @@ public class DocumentService {
 
         RagSplitRequest request = new RagSplitRequest(fullText.toString(), metaMap, documentId,
                 strategy, RagContentType.PDF);
-        List<Document> chunks = splitterRegistry.split(request).stream().map(chunk -> chunk.toDocument()).toList();
+        List<RagChunk> chunks = splitterRegistry.split(request);
         log.info("PDF parsed: {} pages, file_name={}, split into {} chunks",
                 pages.size(), resolvedFilename, chunks.size());
         return chunks;

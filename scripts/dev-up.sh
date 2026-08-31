@@ -17,6 +17,7 @@ echo "Waiting for infrastructure ports..."
 for target in "${MYSQL_HOST_PORT:-3306}:mysql(local)" \
               "${REDIS_HOST_PORT:-16379}:redis" \
               "${MILVUS_HOST_PORT:-29530}:milvus" \
+              "${ATTU_HOST_PORT:-18000}:attu" \
               "${ROCKETMQ_NAMESRV_HOST_PORT:-19876}:rocketmq" \
               "${ELASTICSEARCH_HOST_PORT:-19200}:elasticsearch"; do
   port="${target%%:*}"

@@ -56,6 +56,10 @@ public class RagService {
             "id", "content", "source", "department", "role", "version", "create_time",
             "document_id", "parent_id", "chunk_level", "chunk_index", "total_chunks",
             "strategy", "content_type", "title_path", "start_offset", "end_offset");
+    private static final List<String> CATALOG_OUTPUT_FIELDS = List.of(
+            "id", "source", "department", "role", "version", "create_time", "document_id",
+            "chunk_level", "chunk_index", "total_chunks", "strategy", "content_type");
+    private static final long MAX_ADMIN_CHUNK_ROWS = 16_384L;
 
     private final MilvusServiceClient milvusClient;
     private final EmbeddingModel embeddingModel;
@@ -763,6 +767,66 @@ public class RagService {
             parents.put(hit.getId(), hit);
         }
         return parents;
+    }
+
+    /**
+     * Reads persisted chunks for the administrator knowledge-base view. This path performs only
+     * a scalar Milvus query; it does not invoke embedding, rerank, or chat models.
+     */
+    public List<SearchResponse.SearchHit> listChunksBySources(Collection<String> sources) {
+        if (!collectionReady || sources == null || sources.isEmpty()) {
+            return List.of();
+        }
+        List<String> normalized = sources.stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .distinct()
+                .toList();
+        if (normalized.isEmpty()) {
+            return List.of();
+        }
+
+        String expr = normalized.stream()
+                .map(value -> "\"" + escapeExpr(value) + "\"")
+                .collect(Collectors.joining(",", "source in [", "]"));
+        return queryAdminChunks(expr, CHUNK_OUTPUT_FIELDS);
+    }
+
+    public List<SearchResponse.SearchHit> listAllChunks() {
+        if (!collectionReady) {
+            return List.of();
+        }
+        return queryAdminChunks("id != \"\"", CATALOG_OUTPUT_FIELDS);
+    }
+
+    public List<SearchResponse.SearchHit> listChunksBySource(String source) {
+        return source == null ? List.of() : listChunksBySources(List.of(source));
+    }
+
+    private List<SearchResponse.SearchHit> queryAdminChunks(String expr, List<String> outputFields) {
+        QueryParam param = QueryParam.newBuilder()
+                .withCollectionName(collectionName)
+                .withExpr(expr)
+                .withOutFields(outputFields)
+                .withConsistencyLevel(ConsistencyLevelEnum.STRONG)
+                .withLimit(MAX_ADMIN_CHUNK_ROWS)
+                .build();
+        R<QueryResults> result = milvusClient.query(param);
+        if (result.getStatus() != R.Status.Success.getCode()) {
+            throw new IllegalStateException("Failed to load knowledge chunks: " + result.getMessage());
+        }
+        List<QueryResultsWrapper.RowRecord> rows =
+                new QueryResultsWrapper(result.getData()).getRowRecords();
+        if (rows.size() >= MAX_ADMIN_CHUNK_ROWS) {
+            throw new IllegalStateException("Knowledge chunk query reached the administrative row limit");
+        }
+        return rows.stream()
+                .map(row -> hitFromRow(row.getFieldValues()))
+                .sorted(Comparator
+                        .comparing((SearchResponse.SearchHit hit) -> hit.getMetadata().getSource())
+                        .thenComparingInt(SearchResponse.SearchHit::getChunkIndex))
+                .toList();
     }
 
     private static SearchResponse.SearchHit hitFromRow(Map<String, Object> values) {

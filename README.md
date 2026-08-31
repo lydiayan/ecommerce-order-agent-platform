@@ -97,7 +97,7 @@ cp .env.example .env
 ./scripts/dev-up.sh
 ```
 
-第一个脚本使用本机 `3306` 端口的 MySQL，安全提示输入管理员密码，并幂等创建两套 schema、`portfolio` 本地开发账号和 3 条虚构订单。第二个脚本通过 Compose 启动 Redis、Milvus（含 etcd/MinIO）、RocketMQ 和 Elasticsearch，并检查包括本机 MySQL 在内的全部依赖端口。Docker 服务默认使用 `16379/29530/19876/19200` 等隔离端口，避免与常见本地开发服务冲突。其中 `19200` 的 Elasticsearch 是两个仓库共享的 Trace 存储，AgentInsight 默认直接读取该实例。
+第一个脚本使用本机 `3306` 端口的 MySQL，安全提示输入管理员密码，并幂等创建两套 schema、`portfolio` 本地开发账号和 3 条虚构订单。第二个脚本通过 Compose 启动 Redis、Milvus（含 etcd/MinIO）、Attu、RocketMQ 和 Elasticsearch，并检查包括本机 MySQL 在内的全部依赖端口。Docker 服务默认使用 `16379/29530/18000/19876/19200` 等隔离端口，避免与常见本地开发服务冲突。其中 `19200` 的 Elasticsearch 是两个仓库共享的 Trace 存储，AgentInsight 默认直接读取该实例。Milvus 图形管理页面位于 [http://127.0.0.1:18000](http://127.0.0.1:18000)，连接地址已预设为 Compose 内部的 `milvus:19530`。
 
 ### 3. 启动四个应用进程
 

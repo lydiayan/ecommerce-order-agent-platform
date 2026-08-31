@@ -3,11 +3,13 @@ package com.example.mallordermilvusrag.controller;
 import com.example.mallordermilvusrag.dto.*;
 import com.example.mallordermilvusrag.service.DocumentImportService;
 import com.example.mallordermilvusrag.service.DocumentService;
+import com.example.mallordermilvusrag.service.KnowledgeDocumentService;
 import com.example.mallordermilvusrag.service.RagAskService;
 import com.example.mallordermilvusrag.service.RagService;
 import com.example.mallordermilvusrag.splitter.api.RagSplitStrategy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -31,15 +33,18 @@ public class VectorMilvusController {
     private final DocumentService documentService;
     private final DocumentImportService documentImportService;
     private final RagAskService ragAskService;
+    private final KnowledgeDocumentService knowledgeDocumentService;
 
     public VectorMilvusController(RagService ragService,
                                   DocumentService documentService,
                                   DocumentImportService documentImportService,
-                                  RagAskService ragAskService) {
+                                  RagAskService ragAskService,
+                                  KnowledgeDocumentService knowledgeDocumentService) {
         this.ragService = ragService;
         this.documentService = documentService;
         this.documentImportService = documentImportService;
         this.ragAskService = ragAskService;
+        this.knowledgeDocumentService = knowledgeDocumentService;
     }
 
     @GetMapping("/health")
@@ -53,6 +58,33 @@ public class VectorMilvusController {
         List<String> ids = ragService.addDocument(request.getText(), request.getMetadata(),
                 request.getDocumentId(), request.getStrategy(), request.getContentType());
         return ApiResponse.success("Document added successfully, split into " + ids.size() + " chunks", ids);
+    }
+
+    @GetMapping("/documents/catalog")
+    public ApiResponse<List<KnowledgeDocumentSummary>> documentCatalog() {
+        return ApiResponse.success(knowledgeDocumentService.catalog());
+    }
+
+    @GetMapping("/documents/chunks")
+    public ApiResponse<ChunkPreviewResponse> documentChunks(@RequestParam("source") String source) {
+        return ApiResponse.success(knowledgeDocumentService.storedDocument(source));
+    }
+
+    @PostMapping("/documents/preview")
+    public ApiResponse<ChunkPreviewResponse> previewDocument(@RequestBody AddDocumentRequest request) {
+        return ApiResponse.success(knowledgeDocumentService.previewText(request));
+    }
+
+    @PostMapping(value = "/documents/preview/pdf", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResponse<ChunkPreviewResponse> previewPdf(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "department", required = false) String department,
+            @RequestParam(value = "role", required = false) String role,
+            @RequestParam(value = "version", required = false) String version,
+            @RequestParam(value = "documentId", required = false) String documentId,
+            @RequestParam(value = "strategy", required = false) RagSplitStrategy strategy) throws IOException {
+        return ApiResponse.success(knowledgeDocumentService.previewPdf(
+                file, department, role, version, documentId, strategy));
     }
 
     @PostMapping("/documents/batch")
@@ -152,5 +184,11 @@ public class VectorMilvusController {
     @GetMapping("/stats")
     public ApiResponse<Map<String, Object>> stats() {
         return ApiResponse.success(ragService.stats());
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ApiResponse<Void> badRequest(IllegalArgumentException exception) {
+        return ApiResponse.error(HttpStatus.BAD_REQUEST.value(), exception.getMessage());
     }
 }

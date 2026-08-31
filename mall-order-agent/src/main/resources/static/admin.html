@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>安全管理 · 商城订单 Agent</title>
-  <link rel="stylesheet" href="/auth.css?v=20260824c">
+  <link rel="stylesheet" href="/auth.css?v=20260827b">
 </head>
 <body class="admin-body">
 <header class="admin-header">
@@ -15,6 +15,7 @@
   <nav class="admin-tabs" aria-label="管理视图">
     <button class="tab active" data-tab="users" type="button">账户</button>
     <button class="tab" data-tab="tokens" type="button">评测令牌</button>
+    <button class="tab" data-tab="knowledge" type="button">知识库</button>
     <button class="tab" data-tab="badCases" type="button">Bad Case</button>
     <button class="tab" data-tab="audit" type="button">安全审计</button>
   </nav>
@@ -43,6 +44,80 @@
     <div class="one-time-token hidden" id="oneTimeToken"><strong>新令牌</strong><code id="rawToken"></code><button class="secondary compact" id="copyToken" type="button">复制</button></div>
     <p class="notice" id="tokenNotice" role="status"></p>
     <div class="table-wrap"><table><thead><tr><th>名称</th><th>前缀</th><th>范围</th><th>有效期</th><th>最后使用</th><th>操作</th></tr></thead><tbody id="tokenRows"></tbody></table></div>
+  </section>
+
+  <section class="admin-section knowledge-section hidden" id="knowledgePanel">
+    <input class="hidden" id="knowledgeFile" type="file" accept="application/pdf,.pdf">
+    <div class="knowledge-workspace">
+      <aside class="knowledge-documents" aria-label="知识文档">
+        <div class="knowledge-nav-heading">
+          <span>知识文档</span>
+          <button class="icon-button" id="addKnowledgeFile" type="button" title="上传 PDF" aria-label="上传 PDF">＋</button>
+        </div>
+        <div class="knowledge-document-list" id="knowledgeDocumentList"></div>
+      </aside>
+      <div class="knowledge-content">
+        <div class="knowledge-heading">
+          <div>
+            <h1 id="knowledgeFilename">选择知识文档</h1>
+            <p id="knowledgeMetadata">从左侧查看已入库 Chunk，或上传 PDF 预览新版本</p>
+          </div>
+          <div class="knowledge-actions">
+            <button class="secondary compact" id="uploadKnowledgeVersion" type="button">上传新版本</button>
+            <button class="primary compact" id="confirmKnowledgeImport" type="button" disabled>确认入库</button>
+          </div>
+        </div>
+        <dl class="knowledge-record-summary" aria-label="文档存储信息">
+          <div><dt>状态</dt><dd id="knowledgeRecordStatus">未入库</dd></div>
+          <div><dt>Document ID</dt><dd id="knowledgeRecordDocumentId">—</dd></div>
+          <div><dt>文件大小</dt><dd id="knowledgeRecordFileSize">—</dd></div>
+          <div><dt>SHA-256</dt><dd id="knowledgeRecordFileHash">—</dd></div>
+          <div><dt>入库时间</dt><dd id="knowledgeRecordImportedAt">—</dd></div>
+        </dl>
+        <div class="knowledge-controls">
+          <label>切分策略
+            <select id="knowledgeStrategy">
+              <option value="CONTENT_TYPE_AWARE">内容类型感知</option>
+              <option value="PARENT_CHILD">父子切分</option>
+              <option value="RECURSIVE">递归切分</option>
+              <option value="STRUCTURE_AWARE">结构感知</option>
+              <option value="SLIDING_WINDOW">滑动窗口</option>
+              <option value="FIXED_SIZE">固定大小</option>
+              <option value="SEMANTIC">语义切分（调用 Embedding）</option>
+            </select>
+          </label>
+          <label>内容类型
+            <select id="knowledgeContentType" disabled><option value="PDF">PDF</option></select>
+          </label>
+          <button class="primary compact" id="previewKnowledgeChunks" type="button" disabled>重新预览</button>
+        </div>
+        <div class="knowledge-metadata-controls">
+          <label>部门<input id="knowledgeDepartment" maxlength="128" required disabled></label>
+          <label>可见角色
+            <select id="knowledgeRole" disabled>
+              <option value="public">public</option><option value="hr">hr</option>
+              <option value="finance">finance</option><option value="customer_service">customer_service</option>
+              <option value="developer">developer</option><option value="admin">admin</option>
+              <option value="sales">sales</option>
+            </select>
+          </label>
+          <label>版本<input id="knowledgeVersion" maxlength="64" required disabled></label>
+        </div>
+        <div class="knowledge-metrics" aria-label="切分统计">
+          <div><span>Chunk 数</span><strong id="knowledgeChunkCount">0</strong></div>
+          <div><span>平均 Token</span><strong id="knowledgeAverageTokens">0</strong></div>
+          <div><span>最大 Token</span><strong id="knowledgeMaxTokens">0</strong></div>
+          <div><span>重叠 Token</span><strong id="knowledgeOverlapTokens">0</strong></div>
+        </div>
+        <div class="knowledge-chunk-toolbar">
+          <span><strong id="knowledgeResultTitle">切分结果</strong> · <span id="knowledgeResultCount">暂无数据</span></span>
+          <label class="knowledge-toggle"><input id="knowledgeOverlapToggle" type="checkbox" checked>标记重叠内容</label>
+        </div>
+        <p class="notice knowledge-notice" id="knowledgeNotice" role="status"></p>
+        <div class="knowledge-chunk-list" id="knowledgeChunkList"></div>
+        <div class="knowledge-empty" id="knowledgeEmpty">选择左侧文档查看已入库 Chunk，或上传 PDF 进行预览。</div>
+      </div>
+    </div>
   </section>
 
   <section class="admin-section hidden" id="auditPanel">
@@ -109,6 +184,6 @@
     <div class="dialog-actions"><button class="secondary compact" id="copyTrace" type="button">复制 Trace</button><button class="primary compact" type="submit">保存</button></div>
   </form>
 </dialog>
-<script src="/admin.js?v=20260824c" defer></script>
+<script src="/admin.js?v=20260827b" defer></script>
 </body>
 </html>
