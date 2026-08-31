@@ -38,6 +38,12 @@ public class OrderQueryToolExecutor implements ActionExecutor {
         this.mallOrderClient = mallOrderClient;
     }
 
+    /**
+     * 根据问题中的订单号或当前身份授权客户范围查询订单，并生成可供 LLM 使用的文本结果。
+     *
+     * @param state 包含用户问题、身份和授权客户范围的 Graph 状态
+     * @return TOOL_RESULT 与 grounded 标记
+     */
     @Override
     public Map<String, Object> execute(OverAllState state) {
         RagTraceScope parentTrace = RagTracingAdvisor.parentScope();

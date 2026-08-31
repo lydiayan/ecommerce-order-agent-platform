@@ -57,6 +57,16 @@ public class DocumentImportService {
         this.chunkMetrics = chunkMetrics;
     }
 
+    /**
+     * 使用默认文档编号和默认切分策略导入单个 PDF。
+     *
+     * @param file PDF 文件
+     * @param departmentOverride 可选部门范围覆盖值
+     * @param roleOverride 可选角色范围覆盖值
+     * @param versionOverride 可选版本覆盖值
+     * @return 导入文件、分块数量和分块编号
+     * @throws IOException 读取上传内容失败时抛出
+     */
     public DocumentImportResult importPdf(MultipartFile file,
                                           String departmentOverride,
                                           String roleOverride,
@@ -64,6 +74,19 @@ public class DocumentImportService {
         return importPdf(file, departmentOverride, roleOverride, versionOverride, null, null);
     }
 
+    /**
+     * 校验 PDF、解析元数据并按指定策略导入。相同文件名同一时间只允许一个导入任务。
+     * 状态先写为 {@code IMPORTING}，向量写入成功后转为 {@code READY}，失败时记录原因。
+     *
+     * @param file PDF 文件
+     * @param departmentOverride 可选部门范围覆盖值
+     * @param roleOverride 可选角色范围覆盖值
+     * @param versionOverride 可选版本覆盖值
+     * @param documentId 可选稳定文档编号
+     * @param strategy 可选切分策略
+     * @return 导入结果
+     * @throws IOException 读取上传内容失败时抛出
+     */
     public DocumentImportResult importPdf(MultipartFile file,
                                           String departmentOverride,
                                           String roleOverride,
@@ -75,6 +98,13 @@ public class DocumentImportService {
         return importPdfBytes(file.getBytes(), filename, metadata, documentId, strategy);
     }
 
+    /**
+     * 依次导入多个 PDF，任一文件失败时停止并将异常交给调用方。
+     *
+     * @param files PDF 文件列表
+     * @return 各文件导入结果
+     * @throws IOException 读取任一文件失败时抛出
+     */
     public List<DocumentImportResult> importPdfs(List<MultipartFile> files) throws IOException {
         List<DocumentImportResult> results = new ArrayList<>();
         for (MultipartFile file : files) {
@@ -84,7 +114,10 @@ public class DocumentImportService {
     }
 
     /**
-     * 从 classpath 配置的 data 目录批量导入 PDF（适合 8 份内置知识库文档一键入库）。
+     * 按文件名排序导入 classpath 配置目录中的全部 PDF，适合内置知识库一键入库。
+     *
+     * @return 各文件导入结果
+     * @throws IOException 扫描或读取资源失败时抛出
      */
     public List<DocumentImportResult> importFromClasspathDataDir() throws IOException {
         String pattern = "classpath:" + normalizeDir(properties.getDataDir()) + "/*.pdf";

@@ -26,6 +26,14 @@ public class RefundEligibilityService {
         this.clock = clock;
     }
 
+    /**
+     * 按版本化退款规则评估整单资格。方法会校验订单、配送和商品类型事实，
+     * 根据问题证据或无理由退货条件返回可申请、拒绝、需补充信息或人工复核。
+     *
+     * @param order 已完成归属校验且包含订单明细的订单
+     * @param command 用户退款原因、商品状态声明和证据；为空时按无理由场景评估
+     * @return 权威资格结论、原因编码、缺失字段、下一步动作和规则版本
+     */
     public RefundEligibilityResult evaluate(Order order, RefundEligibilityCommand command) {
         RefundEligibilityCommand resolvedCommand = command != null
                 ? command

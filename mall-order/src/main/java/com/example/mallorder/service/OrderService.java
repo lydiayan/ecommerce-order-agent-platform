@@ -31,6 +31,14 @@ public class OrderService {
         this.refundEligibilityService = refundEligibilityService;
     }
 
+    /**
+     * 查询指定用户拥有的订单并补齐订单明细，避免仅凭订单号越权读取。
+     *
+     * @param orderId 订单编号
+     * @param userId 订单所属用户编号
+     * @return 包含明细的订单
+     * @throws ResponseStatusException 参数为空或订单不属于该用户时抛出
+     */
     public Order getOwnedOrder(String orderId, String userId) {
         Order order = orderMapper.selectOwnedOrder(requireText(orderId, "orderId"), requireText(userId, "userId"));
         if (order == null) {
@@ -40,6 +48,12 @@ public class OrderService {
         return order;
     }
 
+    /**
+     * 查询用户的全部订单，并逐单补齐商品明细。
+     *
+     * @param userId 用户编号
+     * @return 用户订单列表
+     */
     public List<Order> getOrdersByUserId(String userId) {
         List<Order> orders = orderMapper.selectOrdersByUserId(requireText(userId, "userId"));
         for (Order order : orders) {
@@ -48,6 +62,14 @@ public class OrderService {
         return orders;
     }
 
+    /**
+     * 在校验订单归属后取消当前状态允许取消的订单。
+     *
+     * @param orderId 订单编号
+     * @param userId 订单所属用户编号
+     * @return 取消成功时返回 {@code true}
+     * @throws ResponseStatusException 订单不存在、无权访问或状态不允许取消时抛出
+     */
     @Transactional
     public boolean cancelOrder(String orderId, String userId) {
         getOwnedOrder(orderId, userId);
@@ -57,6 +79,14 @@ public class OrderService {
         return true;
     }
 
+    /**
+     * 使用最小参数提交售后申请，兼容 MCP 工具的基础调用契约。
+     *
+     * @param orderId 订单编号
+     * @param userId 订单所属用户编号
+     * @param operationType 售后类型
+     * @return 已存在或新创建的售后工单
+     */
     @Transactional
     public AfterSalesRequest submitAfterSalesRequest(String orderId, String userId, String operationType) {
         return submitAfterSalesRequest(orderId,
@@ -64,12 +94,28 @@ public class OrderService {
                         null, null, List.of()));
     }
 
+    /**
+     * 在校验订单归属后，根据实时订单事实计算退款资格。
+     *
+     * @param orderId 订单编号
+     * @param command 用户身份、退款原因和商品状态声明
+     * @return 包含结论、原因编码、缺失字段和下一步动作的资格结果
+     */
     public RefundEligibilityResult evaluateRefundEligibility(String orderId, RefundEligibilityCommand command) {
         String userId = requireText(command != null ? command.userId() : null, "userId");
         Order order = getOwnedOrder(orderId, userId);
         return refundEligibilityService.evaluate(order, command);
     }
 
+    /**
+     * 校验售后类型、订单归属和退款资格后幂等创建售后工单。
+     * 同一订单和售后类型已有活动工单时直接返回原记录；业务不符合时抛出
+     * {@link AfterSalesRejectionException}，与基础设施异常区分。
+     *
+     * @param orderId 订单编号
+     * @param command 完整售后申请信息
+     * @return 已存在或新创建的活动售后工单
+     */
     @Transactional
     public AfterSalesRequest submitAfterSalesRequest(String orderId, AfterSalesSubmissionCommand command) {
         String userId = requireText(command != null ? command.userId() : null, "userId");
@@ -118,6 +164,12 @@ public class OrderService {
         return afterSalesRequestMapper.selectByActiveRequestKey(activeRequestKey);
     }
 
+    /**
+     * 查询指定用户提交的售后工单。
+     *
+     * @param userId 用户编号
+     * @return 用户售后工单列表
+     */
     public List<AfterSalesRequest> getAfterSalesRequests(String userId) {
         return afterSalesRequestMapper.selectByUserId(requireText(userId, "userId"));
     }

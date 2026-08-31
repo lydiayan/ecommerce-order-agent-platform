@@ -18,6 +18,12 @@ public class KnowledgeChunkMetrics {
         this.splitterProperties = splitterProperties;
     }
 
+    /**
+     * 从已切分文档的公共元数据计算目录展示和导入状态所需指标。
+     *
+     * @param documents 同一文档的分块
+     * @return 文档编号、策略、分块数和 Token 统计
+     */
     public Metrics fromDocuments(List<Document> documents) {
         Map<String, Object> first = documents.isEmpty() ? Map.of() : documents.get(0).getMetadata();
         String strategy = stringValue(first.get(RagChunkMetadata.STRATEGY),
@@ -35,6 +41,12 @@ public class KnowledgeChunkMetrics {
                 maxTokens, overlapTokens(strategy));
     }
 
+    /**
+     * 返回指定策略配置的分块重叠 Token 数。
+     *
+     * @param strategyName 切分策略枚举名称
+     * @return 配置的重叠量；策略无重叠或名称无效时返回 0
+     */
     public int overlapTokens(String strategyName) {
         RagSplitStrategy strategy;
         try {

@@ -35,6 +35,11 @@ public class CredentialSeeder implements ApplicationRunner {
         this.properties = properties;
     }
 
+    /**
+     * demo profile 启动时使用统一演示密码幂等创建预置业务账户和角色关系。
+     *
+     * @param args 应用启动参数，本实现不读取
+     */
     @Override
     @Transactional
     public void run(ApplicationArguments args) {

@@ -17,6 +17,14 @@ public class AppUserDetailsService implements UserDetailsService {
         this.repository = repository;
     }
 
+    /**
+     * 加载账户、角色能力和业务身份能力，组装 Spring Security 认证主体。
+     * 对外统一使用模糊错误信息，避免泄露用户名是否存在。
+     *
+     * @param username 登录用户名
+     * @return 包含账户状态、认证版本和授权能力的主体
+     * @throws UsernameNotFoundException 账户不存在时抛出
+     */
     @Override
     public SecurityUserPrincipal loadUserByUsername(String username) throws UsernameNotFoundException {
         AppUserRepository.UserRow row = repository.findByUsername(username)

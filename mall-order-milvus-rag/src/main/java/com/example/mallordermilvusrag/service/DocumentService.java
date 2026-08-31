@@ -30,10 +30,27 @@ public class DocumentService {
         this.splitterRegistry = splitterRegistry;
     }
 
+    /**
+     * 使用默认策略切分文本并转换为 Spring AI 文档。
+     *
+     * @param text 原始文本
+     * @param metadata 业务元数据
+     * @return 带公共分块元数据的文档列表
+     */
     public List<Document> splitText(String text, DocumentMetadata metadata) {
         return splitText(text, metadata, null, null, null);
     }
 
+    /**
+     * 按指定文档编号、策略和内容类型切分文本并转换为 Spring AI 文档。
+     *
+     * @param text 原始文本
+     * @param metadata 业务元数据
+     * @param documentId 可选稳定文档编号
+     * @param strategy 可选切分策略
+     * @param contentType 可选内容类型
+     * @return 切分后的文档列表
+     */
     public List<Document> splitText(String text, DocumentMetadata metadata, String documentId,
                                     RagSplitStrategy strategy, RagContentType contentType) {
         return splitTextChunks(text, metadata, documentId, strategy, contentType).stream()
@@ -42,8 +59,14 @@ public class DocumentService {
     }
 
     /**
-     * Splits text without converting or persisting the resulting chunks. This is also used by
-     * the knowledge-base preview endpoint so preview and import always share the same algorithm.
+     * 只执行文本切分，不转换或持久化结果。预览和正式导入共用该入口，保证算法一致。
+     *
+     * @param text 原始文本
+     * @param metadata 业务元数据
+     * @param documentId 可选稳定文档编号
+     * @param strategy 可选切分策略
+     * @param contentType 可选内容类型
+     * @return 带偏移、Token 和层级信息的分块
      */
     public List<RagChunk> splitTextChunks(String text, DocumentMetadata metadata, String documentId,
                                           RagSplitStrategy strategy, RagContentType contentType) {
@@ -52,6 +75,12 @@ public class DocumentService {
         return splitterRegistry.split(request);
     }
 
+    /**
+     * 依次切分多份文本并合并所有结果。
+     *
+     * @param texts 文本输入列表
+     * @return 合并后的文档分块
+     */
     public List<Document> splitTexts(List<DocumentInput> texts) {
         List<Document> allChunks = new ArrayList<>();
         for (DocumentInput input : texts) {
@@ -61,10 +90,28 @@ public class DocumentService {
         return allChunks;
     }
 
+    /**
+     * 使用默认策略解析并切分 PDF，返回 Spring AI 文档。
+     *
+     * @param pdfBytes PDF 字节
+     * @param filename 文件名
+     * @param metadata 业务元数据
+     * @return PDF 文档分块
+     */
     public List<Document> parsePdf(byte[] pdfBytes, String filename, DocumentMetadata metadata) {
         return parsePdf(pdfBytes, filename, metadata, null, null);
     }
 
+    /**
+     * 按指定编号和策略解析、清洗并切分 PDF。
+     *
+     * @param pdfBytes PDF 字节
+     * @param filename 文件名
+     * @param metadata 业务元数据
+     * @param documentId 可选稳定文档编号
+     * @param strategy 可选切分策略
+     * @return PDF 文档分块
+     */
     public List<Document> parsePdf(byte[] pdfBytes, String filename, DocumentMetadata metadata,
                                    String documentId, RagSplitStrategy strategy) {
         return parsePdfChunks(pdfBytes, filename, metadata, documentId, strategy).stream()
@@ -72,7 +119,16 @@ public class DocumentService {
                 .toList();
     }
 
-    /** Parses and splits a PDF without writing embeddings or Milvus records. */
+    /**
+     * 按页提取和清洗 PDF 文本后执行切分，不生成 embedding 或写入 Milvus。
+     *
+     * @param pdfBytes PDF 字节
+     * @param filename 文件名
+     * @param metadata 业务元数据
+     * @param documentId 可选稳定文档编号
+     * @param strategy 可选切分策略
+     * @return 保留原文偏移和分块元数据的结果
+     */
     public List<RagChunk> parsePdfChunks(byte[] pdfBytes, String filename, DocumentMetadata metadata,
                                          String documentId, RagSplitStrategy strategy) {
         String resolvedFilename = resolveFilename(filename, metadata);

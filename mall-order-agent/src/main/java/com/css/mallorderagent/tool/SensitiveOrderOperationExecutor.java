@@ -27,6 +27,12 @@ public class SensitiveOrderOperationExecutor {
         this.orderMcpToolClient = orderMcpToolClient;
     }
 
+    /**
+     * 从已审核 Graph 状态提取操作、订单和用户，校验能力后通过 MCP 执行副作用操作。
+     *
+     * @param state 包含用户问题、订单工具结果、用户编号和能力上下文的 Graph 状态
+     * @return 区分成功、业务拒绝和技术失败的结构化执行结果
+     */
     public SensitiveOperationResult execute(OverAllState state) {
         String query = AgentGraphSupport.resolveQuery(state);
         String toolResult = state.value(AgentGraphKeys.TOOL_RESULT, "");

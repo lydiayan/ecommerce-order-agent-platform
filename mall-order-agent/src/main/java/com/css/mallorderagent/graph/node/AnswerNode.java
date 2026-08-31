@@ -32,6 +32,12 @@ public class AnswerNode implements NodeAction {
         this.hybridMemoryManager = hybridMemoryManager;
     }
 
+    /**
+     * 固化最终回答状态，并将本轮用户问题和回答写入短期会话记忆。
+     *
+     * @param state 包含问题、回答、用户和会话信息的 Graph 状态
+     * @return 规范化后的回答、grounded、策略、用户和会话状态增量
+     */
     @Override
     public Map<String, Object> apply(OverAllState state) {
         String userId = AgentGraphSupport.resolveUserId(state, hybridMemoryManager.getDefaultUserId());

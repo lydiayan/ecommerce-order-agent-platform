@@ -14,6 +14,19 @@ import java.util.List;
 @Component
 public class PromptBuilder {
 
+    /**
+     * 按规划策略组合历史对话、用户画像、长期记忆、RAG 证据和工具结果。
+     *
+     * @param plan Planner 输出，决定允许写入 Prompt 的上下文和安全约束
+     * @param history 当前会话的历史问答
+     * @param userProfileContext 用户动态画像上下文
+     * @param longTermMemory 与问题相关的长期记忆
+     * @param context RAG 检索证据
+     * @param toolResult 订单或资格工具返回结果
+     * @param query 当前用户问题
+     * @param systemPrompt 系统级角色和行为约束
+     * @return 分离后的系统 Prompt 与用户消息
+     */
     public BuiltPrompt build(PlanResult plan,
                              List<ConversationTurn> history,
                              String userProfileContext,

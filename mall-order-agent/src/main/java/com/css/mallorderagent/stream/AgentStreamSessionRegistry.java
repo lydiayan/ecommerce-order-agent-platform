@@ -45,6 +45,13 @@ public class AgentStreamSessionRegistry {
         this.clock = clock;
     }
 
+    /**
+     * 创建并注册一个请求级 SSE 会话，同时占用活动流配额。
+     * 连接完成、超时或出错时会触发取消信号。
+     *
+     * @return 供控制器返回的流编号和 SSE 发射器
+     * @throws ResponseStatusException 活动流数量超过配置上限时抛出
+     */
     public StreamHandle open() {
         int active = activeStreams.incrementAndGet();
         if (active > Math.max(1, properties.getMaxActiveStreams())) {
@@ -62,10 +69,21 @@ public class AgentStreamSessionRegistry {
         return new StreamHandle(streamId, emitter);
     }
 
+    /**
+     * 向客户端发送包含流编号的开始事件。
+     *
+     * @param streamId 已注册的流编号
+     */
     public void start(String streamId) {
         requireSession(streamId).send("start", Map.of("streamId", streamId));
     }
 
+    /**
+     * 发送带单调递增序号的文本增量；空文本会被忽略。
+     *
+     * @param streamId 已注册的流编号
+     * @param text 本次增量文本
+     */
     public void emitDelta(String streamId, String text) {
         if (text == null || text.isEmpty()) {
             return;
@@ -75,16 +93,34 @@ public class AgentStreamSessionRegistry {
         session.send("delta", Map.of("sequence", sequence, "text", text));
     }
 
+    /**
+     * 返回客户端断开或服务端取消时完成的响应式信号。
+     *
+     * @param streamId 流编号
+     * @return 会话取消信号；会话不存在时返回空信号
+     */
     public Mono<Void> cancellationSignal(String streamId) {
         StreamSession session = sessions.get(streamId);
         return session != null ? session.cancellationSignal() : Mono.empty();
     }
 
+    /**
+     * 判断流是否已取消；不存在的会话按已取消处理。
+     *
+     * @param streamId 流编号
+     * @return 已取消或不存在时返回 {@code true}
+     */
     public boolean isCancelled(String streamId) {
         StreamSession session = sessions.get(streamId);
         return session == null || session.isCancelled();
     }
 
+    /**
+     * 发送最终 Agent 响应、完成 SSE 连接并释放活动流配额。
+     *
+     * @param streamId 流编号
+     * @param response 最终 Agent 响应
+     */
     public void complete(String streamId, OrderAgentResponse response) {
         StreamSession session = sessions.get(streamId);
         if (session == null) {
@@ -97,6 +133,12 @@ public class AgentStreamSessionRegistry {
         }
     }
 
+    /**
+     * 发送结构化错误事件、完成 SSE 连接并释放活动流配额。
+     *
+     * @param streamId 流编号
+     * @param error 对外错误信息
+     */
     public void fail(String streamId, StreamError error) {
         StreamSession session = sessions.get(streamId);
         if (session == null) {
@@ -109,6 +151,11 @@ public class AgentStreamSessionRegistry {
         }
     }
 
+    /**
+     * 标记流已取消并触发取消信号，但保留会话直到执行方完成释放。
+     *
+     * @param streamId 流编号
+     */
     public void cancel(String streamId) {
         StreamSession session = sessions.get(streamId);
         if (session != null) {
@@ -116,6 +163,11 @@ public class AgentStreamSessionRegistry {
         }
     }
 
+    /**
+     * 取消并移除流会话，释放活动流配额；可安全重复调用。
+     *
+     * @param streamId 流编号
+     */
     public void release(String streamId) {
         StreamSession session = sessions.get(streamId);
         if (session != null) {
@@ -124,10 +176,18 @@ public class AgentStreamSessionRegistry {
         }
     }
 
+    /**
+     * 返回当前已注册且尚未释放的流数量。
+     *
+     * @return 活动流数量
+     */
     public int activeStreamCount() {
         return activeStreams.get();
     }
 
+    /**
+     * 定时取消并移除超过配置超时时间的流会话。
+     */
     @Scheduled(fixedDelayString = "${agent.streaming.cleanup-interval-ms:60000}")
     void expireStaleSessions() {
         long now = clock.millis();
@@ -140,6 +200,9 @@ public class AgentStreamSessionRegistry {
         });
     }
 
+    /**
+     * 定时向活动 SSE 连接发送注释心跳，以便及时发现断开的客户端。
+     */
     @Scheduled(fixedDelayString = "${agent.streaming.heartbeat-interval-ms:15000}")
     void sendHeartbeats() {
         sessions.forEach((streamId, session) -> {

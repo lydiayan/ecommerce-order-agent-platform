@@ -37,6 +37,12 @@ public class PlannerNode implements NodeAction {
         this.planner = planner;
     }
 
+    /**
+     * 识别当前问题意图、生成动作计划并在执行前校验身份能力边界。
+     *
+     * @param state 包含用户问题、身份能力和上轮 checkpoint 的 Graph 状态
+     * @return 本轮清理后的计划、分类结果、审批标记或能力拒绝回答
+     */
     @Override
     public Map<String, Object> apply(OverAllState state) {
         String query = AgentGraphSupport.resolveQuery(state);

@@ -15,6 +15,11 @@ public class DemoOrderResetService {
         this.jdbcTemplate = jdbcTemplate;
     }
 
+    /**
+     * 在单个事务中删除演示用户售后单，并将固定演示订单恢复到初始状态。
+     *
+     * @return 受影响订单数和删除的售后工单数
+     */
     @Transactional
     public DemoOrderResetResult reset() {
         int tickets = jdbcTemplate.update("DELETE FROM after_sales_request WHERE user_id IN ('USER1001', 'USER1002')");

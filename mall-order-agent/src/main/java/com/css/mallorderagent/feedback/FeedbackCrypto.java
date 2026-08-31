@@ -53,6 +53,12 @@ public class FeedbackCrypto {
         }
     }
 
+    /**
+     * 使用随机 IV 的 AES-GCM 加密反馈明文，并在密文中写入格式版本。
+     *
+     * @param plaintext 待加密文本；null 原样返回
+     * @return Base64 编码的版本化密文
+     */
     public String encrypt(String plaintext) {
         if (plaintext == null) return null;
         ensureInitialized();
@@ -70,6 +76,13 @@ public class FeedbackCrypto {
         }
     }
 
+    /**
+     * 校验格式版本并解密 AES-GCM 反馈密文。
+     *
+     * @param ciphertext Base64 编码的版本化密文；null 原样返回
+     * @return 解密后的原始文本
+     * @throws IllegalStateException 密文非法、被篡改或无法解密时抛出
+     */
     public String decrypt(String ciphertext) {
         if (ciphertext == null) return null;
         ensureInitialized();

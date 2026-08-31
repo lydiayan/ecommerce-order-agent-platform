@@ -30,6 +30,14 @@ public class ImpersonationController {
         this.audit = audit;
     }
 
+    /**
+     * 在 demo profile 下让管理员临时代入指定业务身份，并记录代入原因。
+     *
+     * @param input 目标业务身份、管理员复验密码和 5 至 200 字的代入原因
+     * @param principal 当前登录的管理员身份
+     * @param request 当前 HTTP 请求，用于创建代入会话并记录安全审计
+     * @return 代入成功后的前端跳转地址
+     */
     @PostMapping("/admin/impersonation")
     public Map<String, Object> start(@RequestBody StartRequest input,
                                      @AuthenticationPrincipal SecurityUserPrincipal principal,
@@ -53,6 +61,13 @@ public class ImpersonationController {
         return Map.of("code", 200, "message", "success", "data", Map.of("redirect", "/"));
     }
 
+    /**
+     * 结束当前演示身份代入并恢复原管理员身份。
+     *
+     * @param principal 当前处于身份代入状态的管理员身份
+     * @param request 当前 HTTP 请求，用于恢复原会话并记录安全审计
+     * @return 退出代入后的管理员页面跳转地址
+     */
     @PostMapping("/auth/impersonation/exit")
     public Map<String, Object> exit(@AuthenticationPrincipal SecurityUserPrincipal principal,
                                     HttpServletRequest request) {

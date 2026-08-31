@@ -52,6 +52,12 @@ public class LlmNode implements NodeAction {
         this.streamRegistry = streamRegistry;
     }
 
+    /**
+     * 根据已构建 Prompt 同步或流式调用 LLM；敏感订单操作改用确定性确认模板。
+     *
+     * @param state 包含计划、Prompt、检索上下文和可选流编号的 Graph 状态
+     * @return 回答文本以及必要的人工确认标记
+     */
     @Override
     public Map<String, Object> apply(OverAllState state) {
         String query = AgentGraphSupport.resolveQuery(state);

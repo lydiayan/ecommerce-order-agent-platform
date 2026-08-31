@@ -12,6 +12,13 @@ public class PasswordPolicy {
             "password1234", "123456789012", "qwerty123456", "admin12345678",
             "demo12345678", "password@123");
 
+    /**
+     * 校验密码长度、常见弱密码以及是否包含用户名。
+     *
+     * @param username 账户名，可为空
+     * @param password 待设置的明文密码
+     * @throws IllegalArgumentException 密码不满足策略时抛出
+     */
     public void validate(String username, String password) {
         if (password == null || password.length() < 12 || password.length() > 72) {
             throw new IllegalArgumentException("密码长度必须为12至72个字符");

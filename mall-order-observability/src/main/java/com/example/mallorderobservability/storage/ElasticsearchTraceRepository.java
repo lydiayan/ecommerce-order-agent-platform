@@ -40,6 +40,12 @@ public class ElasticsearchTraceRepository {
         this.properties = properties;
     }
 
+    /**
+     * 确保索引存在后，以事件编号为文档编号保存单个 Trace 事件。
+     *
+     * @param event Trace 事件
+     * @throws IOException Elasticsearch 通信失败时抛出
+     */
     public void save(TraceEvent event) throws IOException {
         ensureIndex();
         client.index(IndexRequest.of(i -> i
@@ -48,6 +54,13 @@ public class ElasticsearchTraceRepository {
                 .document(toDocument(event))));
     }
 
+    /**
+     * 查询同一 Trace 的最多 200 个事件，并按毫秒时间戳升序排列。
+     *
+     * @param traceId Trace 编号
+     * @return 按发生顺序排列的事件文档
+     * @throws IOException Elasticsearch 通信失败时抛出
+     */
     public List<Map<String, Object>> findByTraceId(String traceId) throws IOException {
         ensureIndex();
         SearchResponse<Map> response = client.search(SearchRequest.of(s -> s

@@ -39,6 +39,12 @@ public class LlmIntentClassifier implements IntentClassifier {
         this.properties = orderAgentProperties.getIntent();
     }
 
+    /**
+     * 调用配置的轻量模型进行结构化分类，并将异常或非法输出归一为 UNKNOWN。
+     *
+     * @param query 规则无法确定的用户问题
+     * @return 规范化后的模型分类决定
+     */
     @Override
     public IntentModelDecision classify(String query) {
         if (query == null || query.isBlank()) {

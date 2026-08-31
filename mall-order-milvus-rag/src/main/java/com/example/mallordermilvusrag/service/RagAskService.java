@@ -49,6 +49,13 @@ public class RagAskService {
         this.ragTracingAdvisorProvider = ragTracingAdvisorProvider;
     }
 
+    /**
+     * 执行检索增强问答并记录统一 trace。没有有效召回时直接返回固定未命中答复，
+     * 只有存在上下文时才调用生成模型，防止无依据回答。
+     *
+     * @param request 查询、召回数量、阈值、重排和知识范围条件
+     * @return 回答、是否有依据、检索结果和 trace 编号
+     */
     public AskResponse ask(SearchRequest request) {
         if (!ragTraceService.isEnabled()) {
             return askInternal(request, RagTraceScope.noop());

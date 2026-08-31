@@ -17,6 +17,12 @@ public class AdminFeedbackEventController {
         this.repository = repository;
     }
 
+    /**
+     * 将指定的反馈死信事件重新放回待处理状态，供同步任务再次投递。
+     *
+     * @param id 反馈 Outbox 事件主键
+     * @return 是否成功将该死信事件标记为可重放
+     */
     @PostMapping("/{id}/replay")
     public ApiResponse<Boolean> replay(@PathVariable long id) {
         return ApiResponse.success(repository.replayDead(id));

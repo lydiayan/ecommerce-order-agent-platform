@@ -15,6 +15,12 @@ public class OrderApiExceptionHandler {
     static final String BUSINESS_REJECTION = "BUSINESS_REJECTION";
     static final String AFTER_SALES_NOT_ELIGIBLE = "AFTER_SALES_NOT_ELIGIBLE";
 
+    /**
+     * 将售后资格业务拒绝转换为 HTTP 409 和结构化拒绝原因。
+     *
+     * @param exception 包含售后资格判定结果的业务拒绝异常
+     * @return 决策、原因码、缺失字段、下一步动作和策略版本
+     */
     @ExceptionHandler(AfterSalesRejectionException.class)
     public ResponseEntity<AfterSalesRejectionResponse> handleAfterSalesRejection(
             AfterSalesRejectionException exception) {

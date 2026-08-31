@@ -47,17 +47,33 @@ public class MysqlKnowledgeDocumentStore implements KnowledgeDocumentStore {
         this.jdbcTemplate = jdbcTemplate;
     }
 
+    /**
+     * 查询全部知识文档导入状态，供知识库目录与 Milvus 实际分块合并展示。
+     *
+     * @return 按文件名排序的导入记录
+     */
     @Override
     public List<KnowledgeDocumentRecord> findAll() {
         return jdbcTemplate.query(SELECT_COLUMNS + " ORDER BY filename", ROW_MAPPER);
     }
 
+    /**
+     * 按文件名查询知识文档导入状态。
+     *
+     * @param filename 文件名
+     * @return 导入记录，不存在时为空
+     */
     @Override
     public Optional<KnowledgeDocumentRecord> findByFilename(String filename) {
         return jdbcTemplate.query(SELECT_COLUMNS + " WHERE filename = ?", ROW_MAPPER, filename)
                 .stream().findFirst();
     }
 
+    /**
+     * 新建或覆盖文档元数据并标记为导入中，同时清除旧失败信息和完成时间。
+     *
+     * @param record 当前导入的文档及切分统计
+     */
     @Override
     public void saveImporting(KnowledgeDocumentRecord record) {
         jdbcTemplate.update("""
@@ -78,6 +94,11 @@ public class MysqlKnowledgeDocumentStore implements KnowledgeDocumentStore {
                 """, values(record));
     }
 
+    /**
+     * 在向量分块全部写入后将已初始化的导入记录标记为成功。
+     *
+     * @param record 已成功导入的文档记录
+     */
     @Override
     public void saveReady(KnowledgeDocumentRecord record) {
         int updated = jdbcTemplate.update("""
@@ -98,6 +119,12 @@ public class MysqlKnowledgeDocumentStore implements KnowledgeDocumentStore {
         }
     }
 
+    /**
+     * 将文档标记为导入失败，并把错误信息限制在 1000 个字符内。
+     *
+     * @param filename 文件名
+     * @param errorMessage 失败原因
+     */
     @Override
     public void saveFailed(String filename, String errorMessage) {
         jdbcTemplate.update("""

@@ -18,6 +18,12 @@ public class FeedbackEvaluationController {
         this.feedbackService = feedbackService;
     }
 
+    /**
+     * 返回指定 Agent 回复的脱敏评测快照，供 AgentInsight 评价器读取。
+     *
+     * @param responseId Agent 回复的唯一编号
+     * @return 仅包含评测所需字段的反馈与执行摘要
+     */
     @GetMapping("/responses/{responseId}")
     public ApiResponse<AgentFeedbackService.EvaluationSnapshotView> snapshot(
             @PathVariable String responseId) {

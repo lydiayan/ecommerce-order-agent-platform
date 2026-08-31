@@ -12,6 +12,13 @@ public class PdfUploadPolicy {
 
     private static final long MAX_PDF_BYTES = 20L * 1024 * 1024;
 
+    /**
+     * 校验上传文件非空、大小不超过 20 MB 且扩展名为 PDF，并清理路径信息。
+     *
+     * @param file 上传文件
+     * @return 仅包含文件名的安全名称
+     * @throws IllegalArgumentException 文件不符合上传策略时抛出
+     */
     public String validateAndResolveFilename(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("PDF file must not be empty");

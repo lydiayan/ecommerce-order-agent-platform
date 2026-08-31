@@ -31,11 +31,26 @@ public class OrderMcpToolClient {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * 调用 cancelOrder MCP Tool 取消用户拥有的订单。
+     *
+     * @param orderId 待取消订单编号
+     * @param userId 订单所属用户编号
+     * @return Tool 返回的取消结果
+     */
     public boolean cancelOrder(String orderId, String userId) {
         String result = invokeTool("cancelOrder", Map.of("orderId", orderId, "userId", userId));
         return parseBooleanResult(result);
     }
 
+    /**
+     * 调用售后 MCP Tool 提交退款、退货或换货申请。
+     *
+     * @param orderId 申请售后的订单编号
+     * @param userId 订单所属用户编号
+     * @param operationType 退款、退货或换货操作类型
+     * @return 区分成功和业务拒绝的结构化 Tool 结果
+     */
     public AfterSalesToolResult submitAfterSalesRequest(String orderId, String userId, String operationType) {
         Map<String, Object> args = new LinkedHashMap<>();
         args.put("orderId", orderId);
@@ -44,11 +59,31 @@ public class OrderMcpToolClient {
         return parseAfterSalesResult(invokeTool("submitAfterSalesRequest", args));
     }
 
+    /**
+     * 调用地址变更 MCP Tool 为指定订单提交修改请求。
+     *
+     * @param orderId 待修改地址的订单编号
+     * @param userId 订单所属用户编号
+     * @return Tool 返回的业务结果文本
+     */
     public String submitAddressChangeRequest(String orderId, String userId) {
         return unwrapTextResult(invokeTool(
                 "submitAddressChangeRequest", Map.of("orderId", orderId, "userId", userId)));
     }
 
+    /**
+     * 调用退款资格 MCP Tool，并只传递已经解析出的可选事实。
+     *
+     * @param orderId 待评估订单编号
+     * @param userId 订单所属用户编号
+     * @param reasonType 退款原因类型，缺省时使用 NO_REASON
+     * @param customerOpened 商品是否已拆封
+     * @param customerUsed 商品是否已使用
+     * @param conditionStatus 商品当前状态
+     * @param reasonDescription 用户补充原因
+     * @param evidenceUrls 售后凭证地址
+     * @return Tool 返回的结构化资格判断文本
+     */
     public String evaluateRefundEligibility(String orderId,
                                             String userId,
                                             String reasonType,

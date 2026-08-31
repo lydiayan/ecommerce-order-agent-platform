@@ -40,6 +40,12 @@ public class RetrieveNode implements NodeAction, ActionExecutor {
         this.askProperties = ragDocumentProperties.getAsk();
     }
 
+    /**
+     * 在独立 Trace Span 中执行带授权范围的 RAG 检索。
+     *
+     * @param state 包含问答请求、问题和授权范围的 Graph 状态
+     * @return 检索响应、Prompt 上下文、命中数量和 grounded 标记
+     */
     @Override
     public Map<String, Object> apply(OverAllState state) {
         AskRequest request = AgentGraphSupport.requireAskRequest(state);
@@ -89,6 +95,12 @@ public class RetrieveNode implements NodeAction, ActionExecutor {
         return updates;
     }
 
+    /**
+     * 执行实际的 RAG 查询，供 Graph 节点和动态动作调度复用。
+     *
+     * @param state 包含问答请求、问题和授权范围的 Graph 状态
+     * @return 可直接合并进 Graph 的检索状态增量
+     */
     @Override
     public Map<String, Object> execute(OverAllState state) {
         return apply(state);

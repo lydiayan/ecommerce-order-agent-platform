@@ -62,15 +62,40 @@ public class OrderAgentService {
         this.demoPersonaService = demoPersonaService;
     }
 
+    /**
+     * 以允许敏感操作确认的默认策略同步执行一次 Agent 问答。
+     *
+     * @param request 用户问题、会话编号和 RAG 检索参数
+     * @param actorUserId 当前业务身份编号，用于限定能力和数据范围
+     * @return Agent 回答、规划结果、Trace 信息和可能的人工确认状态
+     */
     public OrderAgentResponse ask(AskRequest request, String actorUserId) {
         return ask(request, actorUserId, true);
     }
 
+    /**
+     * 按指定安全策略同步执行一次 Agent 问答。
+     *
+     * @param request 用户问题、会话编号和 RAG 检索参数
+     * @param actorUserId 当前业务身份编号
+     * @param sensitiveConfirmationAllowed 当前身份是否允许确认或取消敏感业务操作
+     * @return Agent 回答、规划结果、Trace 信息和可能的人工确认状态
+     */
     public OrderAgentResponse ask(AskRequest request, String actorUserId,
                                   boolean sensitiveConfirmationAllowed) {
         return ask(request, actorUserId, sensitiveConfirmationAllowed, null);
     }
 
+    /**
+     * 执行流式 Agent 问答，并将生成增量写入预先注册的 SSE 流会话。
+     *
+     * @param request 用户问题、会话编号和 RAG 检索参数
+     * @param actorUserId 当前业务身份编号
+     * @param sensitiveConfirmationAllowed 当前身份是否允许确认或取消敏感业务操作
+     * @param streamId 已由流会话注册中心创建的流编号
+     * @return 流式生成结束后的完整 Agent 响应
+     * @throws IllegalArgumentException streamId 为空时抛出
+     */
     public OrderAgentResponse askStreaming(AskRequest request, String actorUserId,
                                            boolean sensitiveConfirmationAllowed, String streamId) {
         if (streamId == null || streamId.isBlank()) {
@@ -119,6 +144,13 @@ public class OrderAgentService {
         }
     }
 
+    /**
+     * 使用人工审核结论恢复当前身份拥有的中断 Graph，并建立第二阶段 Trace。
+     *
+     * @param request Graph 线程编号、是否批准和可选修订问题
+     * @param actorUserId 当前业务身份编号，用于校验待确认状态归属
+     * @return 恢复后的回答；流程再次中断时仍会携带人工确认信息
+     */
     public OrderAgentResponse resume(HumanFeedbackRequest request, String actorUserId) {
         validateResume(request);
         String threadId = request.getThreadId().trim();
@@ -147,6 +179,13 @@ public class OrderAgentService {
         }
     }
 
+    /**
+     * 放弃当前身份拥有的待确认操作，并清除对应会话的等待状态。
+     *
+     * @param request 包含 Graph 线程编号的放弃请求
+     * @param actorUserId 当前业务身份编号，用于校验待确认状态归属
+     * @return 找到并清除待确认状态后返回 true
+     */
     public boolean abandon(AbandonConversationRequest request, String actorUserId) {
         if (request == null || request.getThreadId() == null || request.getThreadId().isBlank()) {
             throw new IllegalArgumentException("threadId must not be blank");

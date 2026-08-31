@@ -31,6 +31,12 @@ public class SensitiveOperationNode implements NodeAction {
         this.sensitiveOrderOperationExecutor = sensitiveOrderOperationExecutor;
     }
 
+    /**
+     * 在人工批准后调用敏感订单执行器，并把成功、业务拒绝或技术失败写入回答。
+     *
+     * @param state 包含已批准操作、订单上下文和用户身份的 Graph 状态
+     * @return 工具结果、最终回答和 grounded 标记
+     */
     @Override
     public Map<String, Object> apply(OverAllState state) {
         Map<String, Object> startAttributes = new LinkedHashMap<>();

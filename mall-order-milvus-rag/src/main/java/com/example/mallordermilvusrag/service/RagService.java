@@ -284,12 +284,26 @@ public class RagService {
     // ==================== 写操作 ====================
 
     /**
-     * 添加文档到向量库（自动分割 + embedding + 存储）
+     * 使用默认切分配置对文本分块、生成 embedding，并替换该文档在向量库中的分块。
+     *
+     * @param text 原始文本
+     * @param metadata 文档元数据和访问范围
+     * @return 持久化的分块编号
      */
     public List<String> addDocument(String text, DocumentMetadata metadata) {
         return addDocument(text, metadata, null, null, null);
     }
 
+    /**
+     * 按指定文档编号、策略和内容类型分块，并以文档为单位替换向量数据。
+     *
+     * @param text 原始文本
+     * @param metadata 文档元数据和访问范围
+     * @param documentId 可选稳定文档编号
+     * @param strategy 可选切分策略
+     * @param contentType 可选内容类型
+     * @return 持久化的分块编号
+     */
     public List<String> addDocument(String text, DocumentMetadata metadata, String documentId,
                                     RagSplitStrategy strategy, RagContentType contentType) {
         log.info("Adding document to vector store, text length={}", text.length());
@@ -301,7 +315,10 @@ public class RagService {
     }
 
     /**
-     * 批量添加文档
+     * 逐份切分并替换多篇文档的向量分块。
+     *
+     * @param inputs 文档输入列表
+     * @return 全部分块编号
      */
     public List<String> addDocuments(List<DocumentService.DocumentInput> inputs) {
         log.info("Adding {} documents to vector store", inputs.size());
@@ -316,8 +333,11 @@ public class RagService {
     }
 
     /**
-     * 直接添加已处理的文档列表（PDF 场景）
-     * 从每个文档的 Map metadata 中还原 DocumentMetadata
+     * 按 documentId 对已处理分块分组并替换向量数据，供 PDF 导入使用。
+     * 元数据从 Spring AI 文档的 Map 中还原。
+     *
+     * @param documents 已切分并带 embedding 输入信息的文档
+     * @return 持久化的分块编号
      */
     public List<String> addProcessedDocuments(List<Document> documents) {
         log.info("Adding {} processed documents to vector store", documents.size());
@@ -444,7 +464,11 @@ public class RagService {
     // ==================== 搜索 ====================
 
     /**
-     * 语义搜索（不带标量过滤）
+     * 使用默认阈值执行不带标量过滤的语义搜索。
+     *
+     * @param query 查询文本
+     * @param topK 最大召回数
+     * @return 检索结果
      */
     public SearchResponse search(String query, int topK) {
         SearchRequest request = new SearchRequest(query, topK);
@@ -452,7 +476,12 @@ public class RagService {
     }
 
     /**
-     * 带相似度阈值的语义搜索（不带标量过滤）
+     * 使用指定相似度阈值执行不带标量过滤的语义搜索。
+     *
+     * @param query 查询文本
+     * @param topK 最大召回数
+     * @param similarityThreshold 最低相似度
+     * @return 过滤后的检索结果
      */
     public SearchResponse searchWithThreshold(String query, int topK, double similarityThreshold) {
         SearchRequest request = new SearchRequest(query, topK);
@@ -461,7 +490,14 @@ public class RagService {
     }
 
     /**
-     * 带标量过滤的语义搜索
+     * 使用调用方提供的 Milvus 标量表达式执行语义搜索。
+     * 启用统一追踪时，访问范围仍由请求字段构造，不能绕过授权过滤。
+     *
+     * @param query 查询文本
+     * @param topK 最大召回数
+     * @param threshold 最低相似度
+     * @param filterExpr Milvus 标量过滤表达式
+     * @return 检索结果
      */
     public SearchResponse searchWithFilter(String query, int topK, double threshold, String filterExpr) {
         SearchRequest request = new SearchRequest(query, topK);
@@ -473,14 +509,21 @@ public class RagService {
     }
 
     /**
-     * 完整搜索：Milvus 召回 →（可选）qwen3-rerank 重排序。
+     * 执行完整搜索：构造访问范围过滤、Milvus 召回并按配置选择重排。
+     *
+     * @param request 查询和检索控制参数
+     * @return 带召回分数、重排分数和 trace 的结果
      */
     public SearchResponse search(SearchRequest request) {
         return search(request, null);
     }
 
     /**
-     * 在已有 trace 下执行搜索（用于 rag.ask 的 retrieve 子 span）。
+     * 在已有 trace 下执行搜索，供 RAG 问答把检索记录为子 Span。
+     *
+     * @param request 查询和检索控制参数
+     * @param parentTrace 可选父追踪范围
+     * @return 检索结果
      */
     public SearchResponse search(SearchRequest request, RagTraceScope parentTrace) {
         String filterExpr = buildFilterExpression(
@@ -793,6 +836,11 @@ public class RagService {
         return queryAdminChunks(expr, CHUNK_OUTPUT_FIELDS);
     }
 
+    /**
+     * 读取管理查询上限内的全部持久化分块，不调用模型。
+     *
+     * @return 按来源和分块序号排序的分块
+     */
     public List<SearchResponse.SearchHit> listAllChunks() {
         if (!collectionReady) {
             return List.of();
@@ -800,6 +848,12 @@ public class RagService {
         return queryAdminChunks("id != \"\"", CATALOG_OUTPUT_FIELDS);
     }
 
+    /**
+     * 按单个来源读取持久化分块。
+     *
+     * @param source 文档来源
+     * @return 对应分块；来源为空时返回空列表
+     */
     public List<SearchResponse.SearchHit> listChunksBySource(String source) {
         return source == null ? List.of() : listChunksBySources(List.of(source));
     }
@@ -862,11 +916,28 @@ public class RagService {
     /**
      * 构建 Milvus 标量过滤表达式。各过滤条件之间为 AND 关系。
      */
+    /**
+     * 构建单值来源、部门、角色和版本之间为 AND 关系的 Milvus 过滤表达式。
+     *
+     * @return 可为空字符串的过滤表达式
+     */
     public static String buildFilterExpression(String source, String department,
                                                 String role, String version) {
         return buildFilterExpression(source, department, role, version, null, null);
     }
 
+    /**
+     * 构建业务过滤与访问范围过滤表达式；角色与部门范围内部为 OR，
+     * 再与来源、版本等业务条件组合为 AND。
+     *
+     * @param source 可选来源
+     * @param department 可选单部门过滤
+     * @param role 可选单角色过滤
+     * @param version 可选版本
+     * @param departments 可访问部门集合
+     * @param roles 可访问角色集合
+     * @return 已转义的 Milvus 标量过滤表达式
+     */
     public static String buildFilterExpression(String source, String department,
                                                 String role, String version,
                                                 List<String> departments, List<String> roles) {

@@ -39,6 +39,12 @@ public class ActionRunnerNode implements NodeAction {
         this.actionExecutorRegistry = actionExecutorRegistry;
     }
 
+    /**
+     * 按 Planner 动作顺序执行非 LLM 执行器，并合并每一步产生的状态增量。
+     *
+     * @param state 包含 PlanResult 和前序节点输出的 Graph 状态
+     * @return 已执行动作累积产生的状态增量；RAG 无命中时提前短路
+     */
     @Override
     public Map<String, Object> apply(OverAllState state) {
         Map<String, Object> startAttributes = new LinkedHashMap<>();

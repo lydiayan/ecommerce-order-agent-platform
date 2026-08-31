@@ -51,13 +51,22 @@ public class OrderAgentController {
         this.streamExecutor = streamExecutor;
     }
 
+    /**
+     * 检查订单 Agent HTTP 服务是否已经启动并可接收请求。
+     *
+     * @return 固定的服务运行状态说明
+     */
     @GetMapping("/health")
     public ApiResponse<String> health() {
         return ApiResponse.success("Order agent is running");
     }
 
     /**
-     * 订单 Agent 问答：Memory + RAG + Planner + LLM。
+     * 同步执行订单 Agent 问答，依次使用记忆、规划、RAG、工具和 LLM 完成回答。
+     *
+     * @param request 用户问题、会话编号和检索参数
+     * @param principal 当前登录身份；其业务身份决定可访问的订单和能力
+     * @return 完整的 Agent 回答、会话状态以及可能的人工确认信息
      */
     @PostMapping("/ask")
     public ApiResponse<OrderAgentResponse> ask(@RequestBody AskRequest request,
@@ -73,7 +82,12 @@ public class OrderAgentController {
     }
 
     /**
-     * 页面问答流：POST 提交问题，响应以 SSE 逐段返回大模型内容。
+     * 异步执行订单 Agent 问答，并通过 SSE 逐段推送模型内容和最终结果。
+     *
+     * @param request 用户问题、会话编号和检索参数
+     * @param principal 当前登录身份；演示代入身份不能确认敏感操作
+     * @param servletResponse HTTP 响应对象，用于设置禁止缓存和代理缓冲的 SSE 响应头
+     * @return 已注册到流会话中的 SSE 发送器
      */
     @PostMapping(value = "/ask/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter askStream(@RequestBody AskRequest request,
@@ -98,7 +112,12 @@ public class OrderAgentController {
     }
 
     /**
-     * 人工审核后恢复 Graph：approved=true 继续到 answer；approved=false 带 revisedQuery 回到 prompt 重写。
+     * 使用人工审核结果恢复被中断的 Agent Graph。
+     * approved=true 时继续执行敏感操作，approved=false 时按修订问题重新规划。
+     *
+     * @param request Graph 线程编号、审核结论以及可选的修订问题
+     * @param principal 当前登录身份；演示代入身份禁止恢复敏感操作
+     * @return 恢复执行后的 Agent 回答和最新会话状态
      */
     @PostMapping("/resume")
     public ApiResponse<OrderAgentResponse> resume(@RequestBody HumanFeedbackRequest request,
@@ -112,6 +131,13 @@ public class OrderAgentController {
         return ApiResponse.success(response);
     }
 
+    /**
+     * 放弃指定会话中等待人工确认的敏感操作，并结束对应的待恢复状态。
+     *
+     * @param request 待放弃会话的 Graph 线程编号
+     * @param principal 当前登录身份；演示代入身份禁止放弃敏感操作
+     * @return 是否成功放弃该待确认操作
+     */
     @PostMapping("/abandon")
     public ApiResponse<Boolean> abandon(@RequestBody AbandonConversationRequest request,
                                         @AuthenticationPrincipal SecurityUserPrincipal principal) {

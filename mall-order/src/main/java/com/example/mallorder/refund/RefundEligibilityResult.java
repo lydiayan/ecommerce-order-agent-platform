@@ -17,6 +17,11 @@ public record RefundEligibilityResult(
         OffsetDateTime evaluatedAt,
         List<RefundItemResult> itemResults
 ) {
+    /**
+     * 判断资格结论是否允许进入售后工单流程；人工复核也允许先提交申请。
+     *
+     * @return 结论为可申请或人工复核时返回 {@code true}
+     */
     public boolean canSubmitRequest() {
         return decision == RefundDecision.ELIGIBLE || decision == RefundDecision.MANUAL_REVIEW;
     }

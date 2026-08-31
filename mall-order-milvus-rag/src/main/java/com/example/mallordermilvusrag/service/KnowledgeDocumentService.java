@@ -62,6 +62,12 @@ public class KnowledgeDocumentService {
         this.chunkMetrics = chunkMetrics;
     }
 
+    /**
+     * 合并配置目录、文档状态表和 Milvus 实际分块，生成管理员知识库目录。
+     * 即使旧数据缺少状态记录，也会从当前向量分块构造兼容摘要。
+     *
+     * @return 不重复的知识文档摘要
+     */
     public List<KnowledgeDocumentSummary> catalog() {
         Map<String, KnowledgeDocumentRecord> storedRecords = documentStore.findAll().stream()
                 .collect(Collectors.toMap(KnowledgeDocumentRecord::filename, record -> record,
@@ -102,6 +108,12 @@ public class KnowledgeDocumentService {
         return List.copyOf(summaries);
     }
 
+    /**
+     * 按来源读取当前版本的已存储分块和统计信息，不执行 embedding、重排或模型调用。
+     *
+     * @param source 文档来源文件名
+     * @return 文档元数据、切分统计和分块预览
+     */
     public ChunkPreviewResponse storedDocument(String source) {
         String normalizedSource = requireSource(source);
         List<SearchResponse.SearchHit> hits = currentDocument(ragService.listChunksBySource(normalizedSource));
@@ -123,6 +135,12 @@ public class KnowledgeDocumentService {
         return response(normalizedSource, metadata, documentId, strategy, contentType, chunks);
     }
 
+    /**
+     * 使用正式切分算法预览文本分块，但不写入向量库或导入状态表。
+     *
+     * @param request 文本、元数据、文档编号和可选切分策略
+     * @return 分块内容及 Token、重叠等统计
+     */
     public ChunkPreviewResponse previewText(AddDocumentRequest request) {
         if (request == null || request.getText() == null || request.getText().isBlank()) {
             throw new IllegalArgumentException("Preview text must not be blank");
@@ -138,6 +156,18 @@ public class KnowledgeDocumentService {
         return responseFromChunks(filename, metadata, documentId, chunks);
     }
 
+    /**
+     * 校验并解析 PDF 后预览正式切分结果，不产生 embedding 或持久化记录。
+     *
+     * @param file PDF 文件
+     * @param departmentOverride 可选部门范围覆盖值
+     * @param roleOverride 可选角色范围覆盖值
+     * @param versionOverride 可选版本覆盖值
+     * @param documentId 可选稳定文档编号
+     * @param strategy 可选切分策略
+     * @return PDF 分块及统计
+     * @throws IOException 读取 PDF 内容失败时抛出
+     */
     public ChunkPreviewResponse previewPdf(MultipartFile file,
                                            String departmentOverride,
                                            String roleOverride,

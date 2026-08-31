@@ -33,6 +33,9 @@ public class FeedbackEventOutboxPublisher {
         this.rocketMQTemplate = rocketMQTemplate;
     }
 
+    /**
+     * 定时批量发布已到期 Outbox 事件，并以指数退避重试，达到上限后转为死信。
+     */
     @Scheduled(fixedDelayString = "${agent.feedback.sync.poll-interval-ms:1000}")
     public void publishReadyEvents() {
         for (FeedbackEventOutboxRepository.OutboxRow row : repository.findReady(Math.max(1, batchSize))) {

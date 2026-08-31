@@ -66,6 +66,15 @@ public class AgentFeedbackService {
         this(repository, crypto, sanitizer, properties, objectMapper, null);
     }
 
+    /**
+     * 为可评价的 Agent 回答创建加密快照，并把生成的 responseId 回写到响应。
+     * 快照失败不会阻断主问答链路。
+     *
+     * @param response 已完成的 Agent 响应
+     * @param appUserId 当前登录账户主键，用于后续反馈归属校验
+     * @param actorUserId 实际业务身份编号，仅保存不可逆指纹
+     * @param feedbackAllowed 当前身份是否允许提交反馈
+     */
     public void registerResponse(OrderAgentResponse response, long appUserId,
                                  String actorUserId, boolean feedbackAllowed) {
         if (response == null) return;
@@ -103,6 +112,13 @@ public class AgentFeedbackService {
         }
     }
 
+    /**
+     * 新建或覆盖用户反馈，并同步创建、忽略或重新打开关联坏案例及 Outbox 事件。
+     *
+     * @param input 回复编号、赞踩、原因和可选评论
+     * @param appUserId 当前登录账户主键，用于校验回复归属
+     * @return 持久化后的反馈视图
+     */
     @Transactional
     public FeedbackView submit(AgentFeedbackRequest input, long appUserId) {
         ValidatedFeedback feedback = validateFeedback(input);
@@ -134,6 +150,13 @@ public class AgentFeedbackService {
         return toFeedbackView(feedback.responseId(), saved);
     }
 
+    /**
+     * 撤销指定回复的用户反馈，并关闭尚未进入处理流程的坏案例。
+     *
+     * @param rawResponseId Agent 回复编号
+     * @param appUserId 当前登录账户主键，用于校验回复归属
+     * @return 清空评价内容后的反馈视图
+     */
     @Transactional
     public FeedbackView cancel(String rawResponseId, long appUserId) {
         String responseId = validateResponseId(rawResponseId);
@@ -151,6 +174,13 @@ public class AgentFeedbackService {
         return new FeedbackView(responseId, null, List.of(), null, null);
     }
 
+    /**
+     * 查询当前账户对指定回复提交的反馈。
+     *
+     * @param rawResponseId Agent 回复编号
+     * @param appUserId 当前登录账户主键，用于校验回复归属
+     * @return 已有反馈；未评价时返回字段为空的视图
+     */
     @Transactional(readOnly = true)
     public FeedbackView find(String rawResponseId, long appUserId) {
         String responseId = validateResponseId(rawResponseId);
@@ -160,6 +190,12 @@ public class AgentFeedbackService {
                 .orElseGet(() -> new FeedbackView(responseId, null, List.of(), null, null));
     }
 
+    /**
+     * 读取并解密供评测器使用的最小回复快照。
+     *
+     * @param rawResponseId Agent 回复编号
+     * @return 回答、分类、工具摘要、反馈和坏案例状态的评测视图
+     */
     @Transactional(readOnly = true)
     public EvaluationSnapshotView evaluationSnapshot(String rawResponseId) {
         String responseId = validateResponseId(rawResponseId);
@@ -175,6 +211,19 @@ public class AgentFeedbackService {
                 decrypt(row.commentCiphertext()), row.badCaseId(), row.badCaseStatus(), row.badCasePriority());
     }
 
+    /**
+     * 校验筛选条件后分页查询坏案例摘要。
+     *
+     * @param rawStatus 可选坏案例状态
+     * @param rawReason 可选反馈原因
+     * @param rawStrategy 可选 Planner 策略
+     * @param rawModelName 可选模型名称
+     * @param rawAgentVersion 可选 Agent 版本
+     * @param from 创建日期下界（含）
+     * @param to 创建日期上界（含）
+     * @param requestedLimit 请求条数，实际限制在 1 至 200
+     * @return 符合条件的坏案例摘要
+     */
     @Transactional(readOnly = true)
     public List<BadCaseListView> findBadCases(String rawStatus, String rawReason,
                                               String rawStrategy, String rawModelName,
@@ -200,6 +249,12 @@ public class AgentFeedbackService {
                 .toList();
     }
 
+    /**
+     * 查询并解密单个坏案例的完整上下文。
+     *
+     * @param badCaseId 坏案例主键
+     * @return 对话、执行摘要、反馈和处理信息
+     */
     @Transactional(readOnly = true)
     public BadCaseDetailView findBadCase(long badCaseId) {
         if (badCaseId <= 0) throw badRequest("bad case ID 不正确");
@@ -216,6 +271,14 @@ public class AgentFeedbackService {
                 decrypt(row.commentCiphertext()), row.createdAt(), row.updatedAt());
     }
 
+    /**
+     * 按允许的状态机迁移更新坏案例，并记录状态历史和 Outbox 事件。
+     *
+     * @param badCaseId 坏案例主键
+     * @param input 目标状态、分类、负责人、根因、结论和修复版本
+     * @param adminUserId 执行更新的管理员账户主键
+     * @return 更新后的完整坏案例视图
+     */
     @Transactional
     public BadCaseDetailView updateBadCase(long badCaseId, BadCaseUpdateRequest input,
                                            long adminUserId) {
@@ -247,6 +310,12 @@ public class AgentFeedbackService {
         return findBadCase(badCaseId);
     }
 
+    /**
+     * 计算指定时间窗口内的反馈参与率、差评率和解决率。
+     *
+     * @param requestedDays 请求统计天数，实际限制在 1 至 365
+     * @return 反馈及坏案例聚合指标
+     */
     @Transactional(readOnly = true)
     public FeedbackMetricsView metrics(int requestedDays) {
         int days = Math.max(1, Math.min(requestedDays, 365));
@@ -259,6 +328,9 @@ public class AgentFeedbackService {
                 participationRate, downRate, resolvedRate);
     }
 
+    /**
+     * 每日汇总前一天反馈指标，并分批删除达到保留期限的回答快照。
+     */
     @Scheduled(cron = "0 40 3 * * *", zone = "Asia/Shanghai")
     @Transactional
     public void rollupAndPurgeExpiredSnapshots() {

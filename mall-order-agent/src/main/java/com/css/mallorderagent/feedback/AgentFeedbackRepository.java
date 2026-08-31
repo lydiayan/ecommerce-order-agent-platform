@@ -17,6 +17,7 @@ public class AgentFeedbackRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
+    /** @param row 待保存的加密回答快照及其归属、分类和过期信息 */
     public void insertResponse(ResponseSnapshotInsert row) {
         jdbcTemplate.update("""
                 INSERT INTO agent_response_snapshot(
@@ -34,6 +35,11 @@ public class AgentFeedbackRepository {
                 row.toolSummaryCiphertext(), row.operationCiphertext(), Timestamp.valueOf(row.expiresAt()));
     }
 
+    /**
+     * @param responseId Agent 回复编号
+     * @param appUserId 登录账户主键
+     * @return 回复属于该账户且尚未过期时返回 true
+     */
     public boolean responseOwnedBy(String responseId, long appUserId) {
         Integer count = jdbcTemplate.queryForObject("""
                 SELECT COUNT(*) FROM agent_response_snapshot
@@ -42,11 +48,19 @@ public class AgentFeedbackRepository {
         return count != null && count > 0;
     }
 
+    /**
+     * @param responseId Agent 回复编号
+     * @return 关联 Trace ID；不存在时返回 null
+     */
     public String findTraceId(String responseId) {
         return jdbcTemplate.query("SELECT trace_id FROM agent_response_snapshot WHERE response_id = ?",
                 (rs, rowNum) -> rs.getString("trace_id"), responseId).stream().findFirst().orElse(null);
     }
 
+    /**
+     * @param responseId Agent 回复编号
+     * @return 回复快照中的意图分类元数据
+     */
     public Optional<IntentMetadata> findIntentMetadata(String responseId) {
         return jdbcTemplate.query("""
                 SELECT intent, intent_source, intent_confidence, rule_match_status,
@@ -59,6 +73,11 @@ public class AgentFeedbackRepository {
                 responseId).stream().findFirst();
     }
 
+    /**
+     * @param responseId Agent 回复编号
+     * @param appUserId 登录账户主键
+     * @return 当前账户提交的反馈记录
+     */
     public Optional<FeedbackRow> findFeedback(String responseId, long appUserId) {
         return jdbcTemplate.query("""
                 SELECT id, version, rating, reasons_json, comment_ciphertext, updated_at
@@ -69,6 +88,16 @@ public class AgentFeedbackRepository {
                 responseId, appUserId).stream().findFirst();
     }
 
+    /**
+     * 新建或覆盖回复反馈，并递增反馈版本。
+     *
+     * @param responseId Agent 回复编号
+     * @param appUserId 登录账户主键
+     * @param rating UP 或 DOWN
+     * @param reasonsJson 反馈原因 JSON
+     * @param commentCiphertext 加密后的补充评论
+     * @return 保存后的反馈记录
+     */
     public FeedbackRow upsertFeedback(String responseId, long appUserId, String rating,
                                       String reasonsJson, String commentCiphertext) {
         jdbcTemplate.update("""
@@ -84,12 +113,27 @@ public class AgentFeedbackRepository {
                 .orElseThrow(() -> new IllegalStateException("Feedback upsert returned no row"));
     }
 
+    /**
+     * @param responseId Agent 回复编号
+     * @param appUserId 登录账户主键
+     * @return 找到并删除反馈时返回 true
+     */
     public boolean deleteFeedback(String responseId, long appUserId) {
         return jdbcTemplate.update("""
                 DELETE FROM agent_response_feedback WHERE response_id = ? AND app_user_id = ?
                 """, responseId, appUserId) > 0;
     }
 
+    /**
+     * 追加不可变的反馈创建、更新或撤销历史。
+     *
+     * @param responseId Agent 回复编号
+     * @param appUserId 操作账户主键
+     * @param action 反馈变更动作
+     * @param previousRating 变更前评价
+     * @param currentRating 变更后评价
+     * @param reasonsJson 变更时的原因 JSON
+     */
     public void insertFeedbackHistory(String responseId, long appUserId, String action,
                                       String previousRating, String currentRating, String reasonsJson) {
         jdbcTemplate.update("""
@@ -99,6 +143,10 @@ public class AgentFeedbackRepository {
                 """, responseId, appUserId, action, previousRating, currentRating, reasonsJson);
     }
 
+    /**
+     * @param responseId Agent 回复编号
+     * @return 关联坏案例的主键、版本和状态
+     */
     public Optional<BadCaseIdentity> findBadCaseIdentity(String responseId) {
         return jdbcTemplate.query("""
                 SELECT id, version, status FROM agent_bad_case WHERE response_id = ?
@@ -106,6 +154,13 @@ public class AgentFeedbackRepository {
                 rs.getLong("id"), rs.getLong("version"), rs.getString("status")), responseId).stream().findFirst();
     }
 
+    /**
+     * 为差评回复创建或重新打开坏案例，并在必要时提升优先级。
+     *
+     * @param responseId Agent 回复编号
+     * @param priority NORMAL 或 URGENT
+     * @return 创建或更新后的坏案例标识
+     */
     public BadCaseIdentity openBadCase(String responseId, String priority) {
         jdbcTemplate.update("""
                 INSERT INTO agent_bad_case(response_id, version, status, priority, last_feedback_at)
@@ -121,6 +176,12 @@ public class AgentFeedbackRepository {
                 .orElseThrow(() -> new IllegalStateException("Bad case upsert returned no row"));
     }
 
+    /**
+     * 仅将仍为 NEW 的坏案例转为 IGNORED。
+     *
+     * @param responseId Agent 回复编号
+     * @return 成功更新后的坏案例标识
+     */
     public Optional<BadCaseIdentity> ignoreNewBadCase(String responseId) {
         Optional<BadCaseIdentity> current = findBadCaseIdentity(responseId);
         if (current.isEmpty() || !BadCaseStatus.NEW.name().equals(current.get().status())) {
@@ -134,6 +195,13 @@ public class AgentFeedbackRepository {
         return changed > 0 ? findBadCaseIdentity(responseId) : Optional.empty();
     }
 
+    /**
+     * @param badCaseId 坏案例主键
+     * @param changedByUserId 操作账户主键
+     * @param fromStatus 原状态
+     * @param toStatus 目标状态
+     * @param detailsCiphertext 加密后的变更说明
+     */
     public void insertBadCaseHistory(long badCaseId, Long changedByUserId,
                                      String fromStatus, String toStatus, String detailsCiphertext) {
         jdbcTemplate.update("""
@@ -143,6 +211,19 @@ public class AgentFeedbackRepository {
                 """, badCaseId, changedByUserId, fromStatus, toStatus, detailsCiphertext);
     }
 
+    /**
+     * 按状态、原因、策略、版本和时间范围查询坏案例摘要。
+     *
+     * @param status 可选坏案例状态
+     * @param reason 可选反馈原因
+     * @param strategy 可选 Planner 策略
+     * @param modelName 可选模型名称
+     * @param agentVersion 可选 Agent 版本
+     * @param from 创建时间下界（含）
+     * @param toExclusive 创建时间上界（不含）
+     * @param limit 最大返回条数
+     * @return 坏案例摘要列表
+     */
     public List<BadCaseListRow> findBadCases(String status, String reason, String strategy,
                                              String modelName, String agentVersion,
                                              LocalDateTime from, LocalDateTime toExclusive, int limit) {
@@ -178,6 +259,10 @@ public class AgentFeedbackRepository {
                 fromTimestamp, fromTimestamp, toTimestamp, toTimestamp, limit);
     }
 
+    /**
+     * @param badCaseId 坏案例主键
+     * @return 坏案例、回答快照和反馈的完整持久化记录
+     */
     public Optional<BadCaseDetailRow> findBadCase(long badCaseId) {
         return jdbcTemplate.query("""
                 SELECT bc.id, bc.response_id, bc.status, bc.priority, bc.category,
@@ -205,6 +290,17 @@ public class AgentFeedbackRepository {
                 toLocalDateTime(rs.getTimestamp("updated_at"))), badCaseId).stream().findFirst();
     }
 
+    /**
+     * 更新坏案例处理字段并递增聚合版本。
+     *
+     * @param badCaseId 坏案例主键
+     * @param status 目标状态
+     * @param category 问题分类
+     * @param ownerUsername 负责人用户名
+     * @param rootCauseCiphertext 加密后的根因
+     * @param resolutionCiphertext 加密后的处理结论
+     * @param fixVersion 修复版本
+     */
     public void updateBadCase(long badCaseId, String status, String category, String ownerUsername,
                               String rootCauseCiphertext, String resolutionCiphertext, String fixVersion) {
         jdbcTemplate.update("""
@@ -217,6 +313,10 @@ public class AgentFeedbackRepository {
                 resolutionCiphertext, fixVersion, badCaseId);
     }
 
+    /**
+     * @param days 向前统计天数
+     * @return 回复、反馈和坏案例聚合计数
+     */
     public MetricsRow metrics(int days) {
         return jdbcTemplate.queryForObject("""
                 SELECT COUNT(DISTINCT r.response_id) AS response_count,
@@ -236,6 +336,7 @@ public class AgentFeedbackRepository {
                 rs.getLong("down_count"), rs.getLong("triaged_count"), rs.getLong("resolved_count")), days);
     }
 
+    /** 按日期、策略和模型幂等汇总历史反馈指标。 */
     public void rollupDailyMetrics() {
         jdbcTemplate.update("""
                 INSERT INTO agent_feedback_daily_metric(
@@ -255,6 +356,7 @@ public class AgentFeedbackRepository {
                 """);
     }
 
+    /** @return 本批删除的过期回答快照数量，单批最多 1000 条 */
     public int purgeExpiredResponses() {
         return jdbcTemplate.update("""
                 DELETE FROM agent_response_snapshot
@@ -263,6 +365,10 @@ public class AgentFeedbackRepository {
                 """);
     }
 
+    /**
+     * @param responseId Agent 回复编号
+     * @return 未过期回复及其反馈、坏案例的评测快照
+     */
     public Optional<EvaluationSnapshotRow> findEvaluationSnapshot(String responseId) {
         return jdbcTemplate.query("""
                 SELECT r.response_id, r.trace_id, r.plan_strategy, r.intent, r.intent_source,

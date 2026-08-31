@@ -12,6 +12,11 @@ public class FeedbackEvaluationRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
+    /**
+     * 按 responseId 幂等写入评测结果，仅允许较新或同版本事件覆盖已有数据。
+     *
+     * @param event AgentInsight 返回的评分、版本和评测详情
+     */
     public void upsert(FeedbackEvaluationEvent event) {
         jdbcTemplate.update("""
                 INSERT INTO agent_response_evaluation(

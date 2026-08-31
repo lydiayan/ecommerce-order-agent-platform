@@ -24,6 +24,17 @@ public class SecurityAuditService {
         this.clientIpResolver = clientIpResolver;
     }
 
+    /**
+     * 记录安全事件。主体和资源只保存不可逆指纹，审计写入失败会记录错误日志，
+     * 但不会中断原业务请求。
+     *
+     * @param eventType 事件类型
+     * @param subject 操作主体原始标识，入库前会被指纹化
+     * @param resource 目标资源原始标识，入库前会被指纹化
+     * @param outcome 操作结果
+     * @param details 补充信息，最多保存 1000 个字符
+     * @param request 当前 HTTP 请求，可为空
+     */
     public void record(String eventType, String subject, String resource, String outcome,
                        String details, HttpServletRequest request) {
         String userAgent = request != null ? truncate(request.getHeader("User-Agent"), 255) : null;
@@ -41,6 +52,12 @@ public class SecurityAuditService {
         }
     }
 
+    /**
+     * 按时间倒序查询最近的安全事件。
+     *
+     * @param requestedLimit 请求条数，实际限制在 1 至 200
+     * @return 已脱敏的审计事件列表
+     */
     public List<AuditEventView> latest(int requestedLimit) {
         int limit = Math.max(1, Math.min(requestedLimit, 200));
         return jdbcTemplate.query("""
@@ -54,6 +71,9 @@ public class SecurityAuditService {
                 toLocalDateTime(rs.getTimestamp("created_at"))), limit);
     }
 
+    /**
+     * 每日分批删除超过 180 天的安全审计事件，避免长事务和大批量锁定。
+     */
     @Scheduled(cron = "0 20 3 * * *", zone = "Asia/Shanghai")
     public void purgeExpiredEvents() {
         int total = 0;

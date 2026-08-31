@@ -11,7 +11,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
-/** Stable, non-reversible identifiers for trace correlation without storing business IDs. */
+/** 在不保存原始业务编号和模型载荷的前提下提供稳定 Trace 关联信息。 */
 public final class TracePrivacy {
 
     private static final Set<String> SENSITIVE_KEYS = Set.of(
@@ -22,6 +22,12 @@ public final class TracePrivacy {
     private TracePrivacy() {
     }
 
+    /**
+     * 对值生成截断的 SHA-256 指纹，用于同值关联而不能还原原文。
+     *
+     * @param value 原始值
+     * @return 16 位十六进制指纹
+     */
     public static String fingerprint(String value) {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256")
@@ -32,7 +38,12 @@ public final class TracePrivacy {
         }
     }
 
-    /** Removes raw business and model payload fields, including nested maps and lists. */
+    /**
+     * 递归移除业务标识、提示词、回答等敏感字段，同时保留可观测指标。
+     *
+     * @param attributes 原始属性
+     * @return 新建的脱敏属性 Map
+     */
     public static Map<String, Object> sanitizeAttributes(Map<String, ?> attributes) {
         Map<String, Object> sanitized = new LinkedHashMap<>();
         if (attributes == null) {
@@ -46,7 +57,12 @@ public final class TracePrivacy {
         return sanitized;
     }
 
-    /** Keeps only compact error labels such as ConnectException; arbitrary messages are redacted. */
+    /**
+     * 只允许紧凑异常标签进入 Trace，任意错误文本会替换为 {@code redacted}。
+     *
+     * @param value 原始错误标签或文本
+     * @return 安全错误标签
+     */
     public static String sanitizeErrorLabel(String value) {
         if (value == null) {
             return null;

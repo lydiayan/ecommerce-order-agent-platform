@@ -19,6 +19,13 @@ public class FeedbackSanitizer {
     private static final Pattern ADDRESS = Pattern.compile(
             "(?m)(收货地址|联系地址|详细地址|地址)\\s*[:：]\\s*[^\\r\\n]{4,120}");
 
+    /**
+     * 清除令牌、凭据、邮箱、手机号、身份证号和地址后截断文本。
+     *
+     * @param value 待脱敏文本；null 原样返回
+     * @param maxLength 脱敏后允许保留的最大字符数
+     * @return 可安全写入反馈快照的文本
+     */
     public String sanitize(String value, int maxLength) {
         if (value == null) return null;
         String sanitized = value.replace("\u0000", "");

@@ -53,6 +53,12 @@ public class DefaultPlanner implements Planner {
         this.intentProperties = properties.getIntent();
     }
 
+    /**
+     * 优先使用确定性规则分类，规则不确定时调用受限 LLM，并映射为固定动作链。
+     *
+     * @param question 用户原始问题
+     * @return 可执行计划或要求用户澄清的空动作计划
+     */
     @Override
     public PlanResult plan(String question) {
         if (question == null || question.isBlank()) {

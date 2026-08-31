@@ -19,6 +19,15 @@ public class FeedbackEventOutboxService {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * 构造带版本和 Trace 的反馈领域事件，序列化后写入本地 Outbox。
+     *
+     * @param eventType 事件类型
+     * @param aggregateId 回复或坏案例等聚合根编号
+     * @param aggregateVersion 聚合根版本，用于消费者幂等更新
+     * @param traceId 关联的 Agent Trace ID
+     * @param payload 事件业务字段
+     */
     public void append(String eventType, String aggregateId, long aggregateVersion,
                        String traceId, Map<String, Object> payload) {
         FeedbackEvent event = new FeedbackEvent(UUID.randomUUID().toString(), "1.0", eventType,

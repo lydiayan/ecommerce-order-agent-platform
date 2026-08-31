@@ -38,6 +38,12 @@ public class OpenOrderService {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * 通过订单服务查询指定用户的订单列表。
+     *
+     * @param userId 用户编号
+     * @return 用户订单；下游返回空响应时返回空列表
+     */
     @Tool(description = "根据用户ID获取该用户的订单列表")
     public List<Order> getOrdersByUserId(String userId) {
         List<Order> response = webClient.get()
@@ -49,6 +55,13 @@ public class OpenOrderService {
         return response != null ? response : List.of();
     }
 
+    /**
+     * 通过订单服务按订单号和用户归属查询订单详情。
+     *
+     * @param orderId 订单编号
+     * @param userId 当前用户编号
+     * @return 当前用户拥有的订单详情
+     */
     @Tool(description = "按订单ID查询当前用户拥有的订单详情")
     public Order getOrderById(String orderId, String userId) {
         return webClient.get()
@@ -60,6 +73,19 @@ public class OpenOrderService {
                 .block();
     }
 
+    /**
+     * 调用订单规则服务评估整单退款资格，并格式化为约束模型决策的权威文本。
+     *
+     * @param orderId 订单编号
+     * @param userId 当前用户编号
+     * @param reasonType 退款原因类型，可为空
+     * @param customerOpened 用户是否声明已拆封，可为空
+     * @param customerUsed 用户是否声明已使用，可为空
+     * @param conditionStatus 商品是否可二次销售，可为空
+     * @param reasonDescription 问题描述，可为空
+     * @param evidenceUrls 证据地址，可为空
+     * @return 包含资格结论、理由、缺失字段和规则版本的文本
+     */
     @Tool(description = "权威判断当前用户整单退款资格。返回四态结论、原因编码、缺失字段和下一步动作；不得用知识库推翻该结果")
     public String evaluateRefundEligibility(
             String orderId,
@@ -88,6 +114,13 @@ public class OpenOrderService {
         return formatEligibility(result);
     }
 
+    /**
+     * 调用订单服务取消当前用户拥有且状态允许取消的订单。
+     *
+     * @param orderId 订单编号
+     * @param userId 当前用户编号
+     * @return 下游明确返回成功时为 {@code true}
+     */
     @Tool(description = "取消当前用户拥有的订单")
     public boolean cancelOrder(String orderId, String userId) {
         Boolean result = webClient.post()
@@ -100,6 +133,15 @@ public class OpenOrderService {
         return Boolean.TRUE.equals(result);
     }
 
+    /**
+     * 提交退货、退款或换货申请。订单规则拒绝会转换为结构化工具结果，
+     * 网络错误或无法识别的下游错误仍作为技术异常抛出。
+     *
+     * @param orderId 订单编号
+     * @param userId 当前用户编号
+     * @param operationType 售后类型
+     * @return 成功工单信息或包含真实拒绝原因的结构化结果
+     */
     @Tool(description = "为当前用户订单提交退货、退款或换货申请，返回结构化的成功或业务拒绝结果")
     public AfterSalesToolResult submitAfterSalesRequest(@ToolParam(description = "订单id")String orderId, String userId, String operationType) {
         try {
@@ -122,6 +164,13 @@ public class OpenOrderService {
         }
     }
 
+    /**
+     * 为当前用户订单提交修改收货地址申请。
+     *
+     * @param orderId 订单编号
+     * @param userId 当前用户编号
+     * @return 包含订单号和售后工单号的确认文本
+     */
     @Tool(description = "为当前用户订单提交修改收货地址申请")
     public String submitAddressChangeRequest(String orderId, String userId) {
         AfterSalesTicket ticket = createAfterSalesTicket(orderId, userId, "修改收货地址");

@@ -44,6 +44,12 @@ public class DocumentSplitterRegistry {
         this.splitters = Map.copyOf(indexed);
     }
 
+    /**
+     * 补齐默认策略、检测内容类型，再路由到对应切分器。
+     *
+     * @param request 原始切分请求
+     * @return 目标策略生成的标准分块
+     */
     public List<RagChunk> split(RagSplitRequest request) {
         // 先补默认策略并识别内容类型，再把完全归一化的请求交给目标实现。
         RagSplitStrategy strategy = request.strategy() == null

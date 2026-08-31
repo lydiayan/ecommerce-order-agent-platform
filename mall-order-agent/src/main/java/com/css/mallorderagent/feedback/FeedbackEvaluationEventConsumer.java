@@ -26,6 +26,12 @@ public class FeedbackEvaluationEventConsumer implements RocketMQListener<String>
         this.repository = repository;
     }
 
+    /**
+     * 消费 AgentInsight 评测事件并按 responseId 和聚合版本幂等更新本地结果。
+     * 无效消息会抛出异常，交由 RocketMQ 的消费重试策略处理。
+     *
+     * @param message 评测事件 JSON
+     */
     @Override
     public void onMessage(String message) {
         try {
