@@ -227,7 +227,7 @@ E-commerce Order Agent Platform 负责执行，AgentInsight 负责观测和评�
 
 两边必须配置相同的 `AGENT_EVALUATION_TOKEN`。AgentInsight 的历史用例会由 V9 自动迁移到 `http://127.0.0.1:8087/internal/evaluation/ask`，不会使用网页登录会话或客户端身份字段。
 
-建议面试演示顺序：
+建议演示顺序：
 
 1. 展示普通订单查询如何绕过 LLM，直接走确定性 Tool。
 2. 展示 RAG 问答的召回证据、rerank 和 Trace。
