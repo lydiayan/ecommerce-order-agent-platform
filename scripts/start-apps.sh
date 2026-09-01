@@ -19,6 +19,13 @@ mkdir -p logs run
 
 SCREEN_PREFIX="ecommerce-order-agent-platform"
 
+for port in 8081 8082 8089 8087; do
+  if nc -z 127.0.0.1 "$port" >/dev/null 2>&1; then
+    echo "Port $port is already in use. Stop the existing application before running this script." >&2
+    exit 1
+  fi
+done
+
 cleanup_on_error() {
   status=$?
   echo "Application startup failed; stopping processes started by this project." >&2
@@ -80,7 +87,14 @@ start_jar() {
 wait_http() {
   local name="$1"
   local url="$2"
+  local pid
+
+  pid="$(<"run/$name.pid")"
   for _ in $(seq 1 90); do
+    if ! kill -0 "$pid" >/dev/null 2>&1; then
+      echo "$name exited before becoming ready; inspect logs/$name.log" >&2
+      return 1
+    fi
     if curl -fsS "$url" >/dev/null 2>&1; then
       echo "  ready: $name"
       return 0
@@ -95,7 +109,12 @@ start_jar mall-order/target/mall-order-0.0.1-SNAPSHOT.jar mall-order
 wait_http mall-order http://127.0.0.1:8081/orders/health
 
 start_jar mall-order-cmp-server/target/mall-order-cmp-server-0.0.1.jar mall-order-cmp-server
+cmp_pid="$(<run/mall-order-cmp-server.pid)"
 for _ in $(seq 1 90); do
+  if ! kill -0 "$cmp_pid" >/dev/null 2>&1; then
+    echo "mall-order-cmp-server exited before becoming ready; inspect logs/mall-order-cmp-server.log" >&2
+    exit 1
+  fi
   nc -z 127.0.0.1 8082 >/dev/null 2>&1 && break
   sleep 2
 done

@@ -49,6 +49,12 @@ public class MemoryNode implements NodeAction, ActionExecutor {
         this.embeddingModel = embeddingModel;
     }
 
+    /**
+     * 在独立 Trace Span 中加载短期历史、长期记忆和用户画像。
+     *
+     * @param state 包含用户、会话和问题的 Graph 状态
+     * @return 历史对话、长期记忆、画像及对应计数
+     */
     @Override
     public Map<String, Object> apply(OverAllState state) {
         String query = AgentGraphSupport.resolveQuery(state);
@@ -95,6 +101,12 @@ public class MemoryNode implements NodeAction, ActionExecutor {
         }
     }
 
+    /**
+     * 执行实际的混合记忆读取，供 Graph 节点和动态动作调度复用。
+     *
+     * @param state 包含用户、会话和问题的 Graph 状态
+     * @return 可直接合并进 Graph 的记忆状态增量
+     */
     @Override
     public Map<String, Object> execute(OverAllState state) {
         return apply(state);

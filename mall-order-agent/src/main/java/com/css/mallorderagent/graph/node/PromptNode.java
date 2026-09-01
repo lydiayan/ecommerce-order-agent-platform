@@ -40,6 +40,12 @@ public class PromptNode implements NodeAction {
         this.askProperties = ragDocumentProperties.getAsk();
     }
 
+    /**
+     * 从 Graph 状态汇总计划、记忆、画像、工具结果和检索证据，构建 LLM Prompt。
+     *
+     * @param state 已完成 Planner 和非 LLM 动作后的 Graph 状态
+     * @return 仅包含 BUILT_PROMPT 的状态增量
+     */
     @Override
     public Map<String, Object> apply(OverAllState state) {
         String query = AgentGraphSupport.resolveQuery(state);

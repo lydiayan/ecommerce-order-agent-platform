@@ -62,6 +62,13 @@ public class MallOrderClient {
         }
     }
 
+    /**
+     * 通过受服务令牌保护的 HTTP 接口取消指定用户拥有的订单。
+     *
+     * @param orderId 待取消订单编号
+     * @param userId 订单所属用户编号
+     * @return 下游订单服务是否成功取消订单
+     */
     public boolean cancelOrder(String orderId, String userId) {
         try {
             Boolean result = restClient.post()
@@ -78,6 +85,7 @@ public class MallOrderClient {
         }
     }
 
+    /** 调用订单服务的 demo 重置接口，恢复预置订单和售后数据。 */
     public void resetDemoOrders() {
         restClient.post()
                 .uri("/internal/demo/reset")

@@ -18,6 +18,12 @@ public class OrderAgentProperties {
     @NestedConfigurationProperty
     private OrderProperties order = new OrderProperties();
 
+    @NestedConfigurationProperty
+    private StreamingProperties streaming = new StreamingProperties();
+
+    @NestedConfigurationProperty
+    private IntentProperties intent = new IntentProperties();
+
     public ConversationProperties getConversation() {
         return conversation;
     }
@@ -40,6 +46,121 @@ public class OrderAgentProperties {
 
     public void setOrder(OrderProperties order) {
         this.order = order != null ? order : new OrderProperties();
+    }
+
+    public StreamingProperties getStreaming() {
+        return streaming;
+    }
+
+    public void setStreaming(StreamingProperties streaming) {
+        this.streaming = streaming != null ? streaming : new StreamingProperties();
+    }
+
+    public IntentProperties getIntent() {
+        return intent;
+    }
+
+    public void setIntent(IntentProperties intent) {
+        this.intent = intent != null ? intent : new IntentProperties();
+    }
+
+    public static class IntentProperties {
+
+        /** 规则不确定时是否允许调用轻量模型。 */
+        private boolean llmEnabled = true;
+
+        private String model = "qwen-turbo";
+
+        private double confidenceThreshold = 0.8D;
+
+        private int maxQueryLength = 2_000;
+
+        public boolean isLlmEnabled() {
+            return llmEnabled;
+        }
+
+        public void setLlmEnabled(boolean llmEnabled) {
+            this.llmEnabled = llmEnabled;
+        }
+
+        public String getModel() {
+            return model;
+        }
+
+        public void setModel(String model) {
+            this.model = model;
+        }
+
+        public double getConfidenceThreshold() {
+            return Math.max(0D, Math.min(confidenceThreshold, 1D));
+        }
+
+        public void setConfidenceThreshold(double confidenceThreshold) {
+            this.confidenceThreshold = confidenceThreshold;
+        }
+
+        public int getMaxQueryLength() {
+            return Math.max(1, maxQueryLength);
+        }
+
+        public void setMaxQueryLength(int maxQueryLength) {
+            this.maxQueryLength = maxQueryLength;
+        }
+    }
+
+    public static class StreamingProperties {
+
+        /** SSE 连接及其后端任务的最大存活时间 */
+        private long timeoutMillis = 180_000;
+
+        /** 同时存在的流式请求上限 */
+        private int maxActiveStreams = 100;
+
+        private int corePoolSize = 4;
+
+        private int maxPoolSize = 16;
+
+        private int queueCapacity = 64;
+
+        public long getTimeoutMillis() {
+            return timeoutMillis;
+        }
+
+        public void setTimeoutMillis(long timeoutMillis) {
+            this.timeoutMillis = timeoutMillis;
+        }
+
+        public int getMaxActiveStreams() {
+            return maxActiveStreams;
+        }
+
+        public void setMaxActiveStreams(int maxActiveStreams) {
+            this.maxActiveStreams = maxActiveStreams;
+        }
+
+        public int getCorePoolSize() {
+            return corePoolSize;
+        }
+
+        public void setCorePoolSize(int corePoolSize) {
+            this.corePoolSize = corePoolSize;
+        }
+
+        public int getMaxPoolSize() {
+            return maxPoolSize;
+        }
+
+        public void setMaxPoolSize(int maxPoolSize) {
+            this.maxPoolSize = maxPoolSize;
+        }
+
+        public int getQueueCapacity() {
+            return queueCapacity;
+        }
+
+        public void setQueueCapacity(int queueCapacity) {
+            this.queueCapacity = queueCapacity;
+        }
     }
 
     public static class OrderProperties {

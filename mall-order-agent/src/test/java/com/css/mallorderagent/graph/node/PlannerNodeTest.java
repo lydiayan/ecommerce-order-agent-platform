@@ -29,6 +29,10 @@ class PlannerNodeTest {
     @Test
     void emitsPlannerSpanWithPlanDetails() {
         PlanResult plan = new PlanResult("RAG_QA", ActionDefinitions.ragQaPipeline());
+        plan.setIntent("RAG_QA");
+        plan.setIntentSource("RULE");
+        plan.setIntentConfidence(0.95D);
+        plan.setRuleMatchStatus("MATCH");
         PlannerNode node = new PlannerNode(query -> plan);
         List<TraceEvent> events = new ArrayList<>();
         RagTraceService traceService = traceService(events);
@@ -59,6 +63,10 @@ class PlannerNodeTest {
         assertEquals(List.of("MEMORY_LOAD", "KNOWLEDGE_SEARCH", "LLM_GENERATE"),
                 plannerEnd.getAttributes().get("actions"));
         assertEquals(false, plannerEnd.getAttributes().get("humanApprovalRequired"));
+        assertEquals("RAG_QA", plannerEnd.getAttributes().get("intent"));
+        assertEquals("RULE", plannerEnd.getAttributes().get("intentSource"));
+        assertEquals(0.95D, plannerEnd.getAttributes().get("intentConfidence"));
+        assertEquals("MATCH", plannerEnd.getAttributes().get("ruleMatchStatus"));
     }
 
     @Test
@@ -138,6 +146,26 @@ class PlannerNodeTest {
         assertEquals(false, result.get(AgentGraphKeys.GROUNDED));
         assertEquals(Map.of(), result.get(AgentGraphKeys.HUMAN_FEEDBACK));
         assertEquals("", result.get(AgentGraphKeys.NEXT_NODE));
+    }
+
+    @Test
+    void lowConfidencePlanReturnsClarificationWithoutActions() {
+        PlanResult plan = new PlanResult("CLARIFY_INTENT", List.of());
+        plan.setIntent("UNKNOWN");
+        plan.setIntentSource("LLM");
+        plan.setIntentConfidence(0.45D);
+        plan.setRuleMatchStatus("NO_MATCH");
+        plan.setClarificationRequired(true);
+        plan.setClarificationMessage("请明确说明您的需求。");
+        PlannerNode node = new PlannerNode(query -> plan);
+
+        Map<String, Object> result = node.apply(new OverAllState(Map.of(
+                AgentGraphKeys.QUERY, "这个怎么办")));
+
+        assertEquals("请明确说明您的需求。", result.get(AgentGraphKeys.ANSWER));
+        assertEquals(true, result.get(AgentGraphKeys.CLARIFICATION_REQUIRED));
+        assertEquals("LLM", result.get(AgentGraphKeys.INTENT_SOURCE));
+        assertEquals(0.45D, result.get(AgentGraphKeys.INTENT_CONFIDENCE));
     }
 
     private static RagTraceService traceService(List<TraceEvent> events) {

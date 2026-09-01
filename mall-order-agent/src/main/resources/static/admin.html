@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>安全管理 · 商城订单 Agent</title>
-  <link rel="stylesheet" href="/auth.css">
+  <link rel="stylesheet" href="/auth.css?v=20260827b">
 </head>
 <body class="admin-body">
 <header class="admin-header">
@@ -15,6 +15,8 @@
   <nav class="admin-tabs" aria-label="管理视图">
     <button class="tab active" data-tab="users" type="button">账户</button>
     <button class="tab" data-tab="tokens" type="button">评测令牌</button>
+    <button class="tab" data-tab="knowledge" type="button">知识库</button>
+    <button class="tab" data-tab="badCases" type="button">Bad Case</button>
     <button class="tab" data-tab="audit" type="button">安全审计</button>
   </nav>
 
@@ -44,9 +46,106 @@
     <div class="table-wrap"><table><thead><tr><th>名称</th><th>前缀</th><th>范围</th><th>有效期</th><th>最后使用</th><th>操作</th></tr></thead><tbody id="tokenRows"></tbody></table></div>
   </section>
 
+  <section class="admin-section knowledge-section hidden" id="knowledgePanel">
+    <input class="hidden" id="knowledgeFile" type="file" accept="application/pdf,.pdf">
+    <div class="knowledge-workspace">
+      <aside class="knowledge-documents" aria-label="知识文档">
+        <div class="knowledge-nav-heading">
+          <span>知识文档</span>
+          <button class="icon-button" id="addKnowledgeFile" type="button" title="上传 PDF" aria-label="上传 PDF">＋</button>
+        </div>
+        <div class="knowledge-document-list" id="knowledgeDocumentList"></div>
+      </aside>
+      <div class="knowledge-content">
+        <div class="knowledge-heading">
+          <div>
+            <h1 id="knowledgeFilename">选择知识文档</h1>
+            <p id="knowledgeMetadata">从左侧查看已入库 Chunk，或上传 PDF 预览新版本</p>
+          </div>
+          <div class="knowledge-actions">
+            <button class="secondary compact" id="uploadKnowledgeVersion" type="button">上传新版本</button>
+            <button class="primary compact" id="confirmKnowledgeImport" type="button" disabled>确认入库</button>
+          </div>
+        </div>
+        <dl class="knowledge-record-summary" aria-label="文档存储信息">
+          <div><dt>状态</dt><dd id="knowledgeRecordStatus">未入库</dd></div>
+          <div><dt>Document ID</dt><dd id="knowledgeRecordDocumentId">—</dd></div>
+          <div><dt>文件大小</dt><dd id="knowledgeRecordFileSize">—</dd></div>
+          <div><dt>SHA-256</dt><dd id="knowledgeRecordFileHash">—</dd></div>
+          <div><dt>入库时间</dt><dd id="knowledgeRecordImportedAt">—</dd></div>
+        </dl>
+        <div class="knowledge-controls">
+          <label>切分策略
+            <select id="knowledgeStrategy">
+              <option value="CONTENT_TYPE_AWARE">内容类型感知</option>
+              <option value="PARENT_CHILD">父子切分</option>
+              <option value="RECURSIVE">递归切分</option>
+              <option value="STRUCTURE_AWARE">结构感知</option>
+              <option value="SLIDING_WINDOW">滑动窗口</option>
+              <option value="FIXED_SIZE">固定大小</option>
+              <option value="SEMANTIC">语义切分（调用 Embedding）</option>
+            </select>
+          </label>
+          <label>内容类型
+            <select id="knowledgeContentType" disabled><option value="PDF">PDF</option></select>
+          </label>
+          <button class="primary compact" id="previewKnowledgeChunks" type="button" disabled>重新预览</button>
+        </div>
+        <div class="knowledge-metadata-controls">
+          <label>部门<input id="knowledgeDepartment" maxlength="128" required disabled></label>
+          <label>可见角色
+            <select id="knowledgeRole" disabled>
+              <option value="public">public</option><option value="hr">hr</option>
+              <option value="finance">finance</option><option value="customer_service">customer_service</option>
+              <option value="developer">developer</option><option value="admin">admin</option>
+              <option value="sales">sales</option>
+            </select>
+          </label>
+          <label>版本<input id="knowledgeVersion" maxlength="64" required disabled></label>
+        </div>
+        <div class="knowledge-metrics" aria-label="切分统计">
+          <div><span>Chunk 数</span><strong id="knowledgeChunkCount">0</strong></div>
+          <div><span>平均 Token</span><strong id="knowledgeAverageTokens">0</strong></div>
+          <div><span>最大 Token</span><strong id="knowledgeMaxTokens">0</strong></div>
+          <div><span>重叠 Token</span><strong id="knowledgeOverlapTokens">0</strong></div>
+        </div>
+        <div class="knowledge-chunk-toolbar">
+          <span><strong id="knowledgeResultTitle">切分结果</strong> · <span id="knowledgeResultCount">暂无数据</span></span>
+          <label class="knowledge-toggle"><input id="knowledgeOverlapToggle" type="checkbox" checked>标记重叠内容</label>
+        </div>
+        <p class="notice knowledge-notice" id="knowledgeNotice" role="status"></p>
+        <div class="knowledge-chunk-list" id="knowledgeChunkList"></div>
+        <div class="knowledge-empty" id="knowledgeEmpty">选择左侧文档查看已入库 Chunk，或上传 PDF 进行预览。</div>
+      </div>
+    </div>
+  </section>
+
   <section class="admin-section hidden" id="auditPanel">
     <div class="section-heading"><div><h1>安全审计</h1><p>保留 180 天，用户和资源以脱敏指纹显示</p></div><button class="secondary compact" id="refreshAudit" type="button">刷新</button></div>
     <div class="table-wrap"><table><thead><tr><th>时间</th><th>事件</th><th>主体</th><th>资源</th><th>结果</th><th>来源</th></tr></thead><tbody id="auditRows"></tbody></table></div>
+  </section>
+
+  <section class="admin-section hidden" id="badCasesPanel">
+    <div class="section-heading"><div><h1>Bad Case</h1><p>Agent 回答质量闭环</p></div><button class="secondary compact" id="refreshBadCases" type="button">刷新</button></div>
+    <div class="metric-strip" id="feedbackMetrics">
+      <div><span>回答</span><strong id="metricResponses">—</strong></div>
+      <div><span>反馈</span><strong id="metricFeedback">—</strong></div>
+      <div><span>参与率</span><strong id="metricParticipation">—</strong></div>
+      <div><span>点踩率</span><strong id="metricDownRate">—</strong></div>
+      <div><span>已解决</span><strong id="metricResolved">—</strong></div>
+    </div>
+    <form class="filter-form" id="badCaseFilters">
+      <label>状态<select id="badCaseStatusFilter"><option value="">全部</option><option>NEW</option><option>TRIAGED</option><option>IN_PROGRESS</option><option>RESOLVED</option><option>IGNORED</option></select></label>
+      <label>点踩原因<select id="badCaseReasonFilter"><option value="">全部</option><option value="INCORRECT">回答错误</option><option value="IRRELEVANT">答非所问</option><option value="INCOMPLETE">信息不完整</option><option value="TOOL_FAILURE">工具执行失败</option><option value="HARD_TO_UNDERSTAND">难以理解</option><option value="SAFETY_RISK">存在安全风险</option><option value="OTHER">其他</option></select></label>
+      <label>策略<input id="badCaseStrategyFilter" maxlength="64" placeholder="例如 RAG_QA"></label>
+      <label>模型<input id="badCaseModelFilter" maxlength="128" placeholder="例如 qwen-plus"></label>
+      <label>Agent 版本<input id="badCaseVersionFilter" maxlength="64"></label>
+      <label>开始日期<input id="badCaseFromFilter" type="date"></label>
+      <label>结束日期<input id="badCaseToFilter" type="date"></label>
+      <button class="primary compact" type="submit">筛选</button>
+    </form>
+    <p class="notice" id="badCaseNotice" role="status"></p>
+    <div class="table-wrap"><table><thead><tr><th>更新时间</th><th>状态</th><th>优先级</th><th>原因</th><th>策略 / 模型</th><th>负责人</th><th>操作</th></tr></thead><tbody id="badCaseRows"></tbody></table></div>
   </section>
 </main>
 <dialog id="passwordDialog">
@@ -66,6 +165,25 @@
     <div class="dialog-actions"><button class="secondary compact" type="button" id="cancelImpersonation">取消</button><button class="primary compact" type="submit">进入</button></div>
   </form>
 </dialog>
-<script src="/admin.js" defer></script>
+<dialog id="badCaseDialog" class="bad-case-dialog">
+  <form method="dialog" id="badCaseForm">
+    <div class="bad-case-dialog-heading"><div><h2>Bad Case <span id="badCaseId"></span></h2><p id="badCaseMeta"></p></div><button class="secondary compact" id="closeBadCase" type="button">关闭</button></div>
+    <div class="bad-case-copy"><strong>用户问题</strong><pre id="badCaseQuery"></pre></div>
+    <div class="bad-case-copy"><strong>Agent 回答</strong><pre id="badCaseAnswer"></pre></div>
+    <div class="bad-case-copy"><strong>工具摘要</strong><pre id="badCaseToolSummary"></pre></div>
+    <div class="bad-case-copy"><strong>反馈</strong><p id="badCaseFeedback"></p></div>
+    <div class="bad-case-fields">
+      <label>状态<select id="badCaseStatus" required></select></label>
+      <label>问题分类<input id="badCaseCategory" maxlength="64"></label>
+      <label>负责人<input id="badCaseOwner" maxlength="64"></label>
+      <label>修复版本<input id="badCaseFixVersion" maxlength="64"></label>
+    </div>
+    <label>根因<textarea id="badCaseRootCause" maxlength="2000" rows="3"></textarea></label>
+    <label>处理结论<textarea id="badCaseResolution" maxlength="2000" rows="3"></textarea></label>
+    <p class="notice" id="badCaseDialogNotice" role="status"></p>
+    <div class="dialog-actions"><button class="secondary compact" id="copyTrace" type="button">复制 Trace</button><button class="primary compact" type="submit">保存</button></div>
+  </form>
+</dialog>
+<script src="/admin.js?v=20260827b" defer></script>
 </body>
 </html>

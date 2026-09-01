@@ -1,6 +1,7 @@
 package com.css.mallorderagent.tool.client;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,24 +31,59 @@ public class OrderMcpToolClient {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * 调用 cancelOrder MCP Tool 取消用户拥有的订单。
+     *
+     * @param orderId 待取消订单编号
+     * @param userId 订单所属用户编号
+     * @return Tool 返回的取消结果
+     */
     public boolean cancelOrder(String orderId, String userId) {
         String result = invokeTool("cancelOrder", Map.of("orderId", orderId, "userId", userId));
         return parseBooleanResult(result);
     }
 
-    public String submitAfterSalesRequest(String orderId, String userId, String operationType) {
+    /**
+     * 调用售后 MCP Tool 提交退款、退货或换货申请。
+     *
+     * @param orderId 申请售后的订单编号
+     * @param userId 订单所属用户编号
+     * @param operationType 退款、退货或换货操作类型
+     * @return 区分成功和业务拒绝的结构化 Tool 结果
+     */
+    public AfterSalesToolResult submitAfterSalesRequest(String orderId, String userId, String operationType) {
         Map<String, Object> args = new LinkedHashMap<>();
         args.put("orderId", orderId);
         args.put("userId", userId);
         args.put("operationType", operationType);
-        return unwrapTextResult(invokeTool("submitAfterSalesRequest", args));
+        return parseAfterSalesResult(invokeTool("submitAfterSalesRequest", args));
     }
 
+    /**
+     * 调用地址变更 MCP Tool 为指定订单提交修改请求。
+     *
+     * @param orderId 待修改地址的订单编号
+     * @param userId 订单所属用户编号
+     * @return Tool 返回的业务结果文本
+     */
     public String submitAddressChangeRequest(String orderId, String userId) {
         return unwrapTextResult(invokeTool(
                 "submitAddressChangeRequest", Map.of("orderId", orderId, "userId", userId)));
     }
 
+    /**
+     * 调用退款资格 MCP Tool，并只传递已经解析出的可选事实。
+     *
+     * @param orderId 待评估订单编号
+     * @param userId 订单所属用户编号
+     * @param reasonType 退款原因类型，缺省时使用 NO_REASON
+     * @param customerOpened 商品是否已拆封
+     * @param customerUsed 商品是否已使用
+     * @param conditionStatus 商品当前状态
+     * @param reasonDescription 用户补充原因
+     * @param evidenceUrls 售后凭证地址
+     * @return Tool 返回的结构化资格判断文本
+     */
     public String evaluateRefundEligibility(String orderId,
                                             String userId,
                                             String reasonType,
@@ -71,9 +107,9 @@ public class OrderMcpToolClient {
     }
 
     String invokeTool(String toolName, Map<String, Object> arguments) {
-        ToolCallback callback = findTool(toolName)
-                .orElseThrow(() -> new OrderMcpToolException("未找到 MCP Tool: " + toolName));
         try {
+            ToolCallback callback = findTool(toolName)
+                    .orElseThrow(() -> new OrderMcpToolException("未找到 MCP Tool: " + toolName));
             String payload = objectMapper.writeValueAsString(arguments);
             log.info("Invoking MCP tool={}, argumentKeys={}", toolName, arguments.keySet());
             return callback.call(payload);
@@ -120,20 +156,80 @@ public class OrderMcpToolClient {
             return "";
         }
         String trimmed = raw.trim();
-        if (trimmed.startsWith("\"") && trimmed.endsWith("\"") && trimmed.length() >= 2) {
-            return trimmed.substring(1, trimmed.length() - 1);
+        if (trimmed.isEmpty()) {
+            return trimmed;
         }
         try {
-            Map<String, Object> map = objectMapper.readValue(trimmed, new TypeReference<>() {
-            });
-            Object text = map.get("text");
-            if (text != null) {
-                return String.valueOf(text).trim();
+            JsonNode node = objectMapper.readTree(trimmed);
+            String extracted = extractText(node);
+            if (extracted != null) {
+                return extracted;
             }
         } catch (Exception ignored) {
             // plain text response
         }
         return trimmed;
+    }
+
+    /**
+     * Spring AI serializes MCP content as an array of content blocks. Handle
+     * that shape as well as the object/string wrappers used by older clients.
+     */
+    private String extractText(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return null;
+        }
+        if (node.isTextual()) {
+            return unwrapTextResult(node.textValue());
+        }
+        if (node.isArray()) {
+            for (JsonNode item : node) {
+                String text = extractText(item);
+                if (text != null) {
+                    return text;
+                }
+            }
+            return null;
+        }
+        if (node.isObject()) {
+            JsonNode text = node.get("text");
+            if (text != null) {
+                return extractText(text);
+            }
+            JsonNode data = node.get("data");
+            if (data != null) {
+                return extractText(data);
+            }
+        }
+        return null;
+    }
+
+    private AfterSalesToolResult parseAfterSalesResult(String raw) {
+        String text = unwrapTextResult(raw);
+        JsonNode resultNode;
+        try {
+            resultNode = objectMapper.readTree(text);
+        } catch (Exception ignored) {
+            return AfterSalesToolResult.legacySuccess(text);
+        }
+        if (resultNode == null || !resultNode.isObject()) {
+            throw new OrderMcpToolException("MCP Tool 返回了无效的售后结果结构");
+        }
+        Map<String, Object> map;
+        try {
+            map = objectMapper.readValue(text, new TypeReference<>() {
+            });
+        } catch (Exception exception) {
+            throw new OrderMcpToolException("MCP Tool 返回了无效的售后结果", exception);
+        }
+        if (map.containsKey("success")) {
+            try {
+                return objectMapper.convertValue(map, AfterSalesToolResult.class);
+            } catch (IllegalArgumentException exception) {
+                throw new OrderMcpToolException("MCP Tool 返回了无效的售后结果", exception);
+            }
+        }
+        throw new OrderMcpToolException("MCP Tool 返回的售后结果缺少 success 字段");
     }
 
     private static void putIfNotNull(Map<String, Object> arguments, String key, Object value) {

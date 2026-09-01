@@ -14,6 +14,19 @@ import java.util.List;
 @Component
 public class PromptBuilder {
 
+    /**
+     * 按规划策略组合历史对话、用户画像、长期记忆、RAG 证据和工具结果。
+     *
+     * @param plan Planner 输出，决定允许写入 Prompt 的上下文和安全约束
+     * @param history 当前会话的历史问答
+     * @param userProfileContext 用户动态画像上下文
+     * @param longTermMemory 与问题相关的长期记忆
+     * @param context RAG 检索证据
+     * @param toolResult 订单或资格工具返回结果
+     * @param query 当前用户问题
+     * @param systemPrompt 系统级角色和行为约束
+     * @return 分离后的系统 Prompt 与用户消息
+     */
     public BuiltPrompt build(PlanResult plan,
                              List<ConversationTurn> history,
                              String userProfileContext,
@@ -34,7 +47,8 @@ public class PromptBuilder {
         }
 
         if (userProfileContext != null && !userProfileContext.isBlank()) {
-            userMessage.append(userProfileContext.trim()).append("\n\n");
+            userMessage.append("身份与表达上下文（仅用于称谓和回答深度，不作为权限依据）：\n")
+                    .append(userProfileContext.trim()).append("\n\n");
         }
 
         if (longTermMemory != null && !longTermMemory.isBlank()) {
@@ -79,9 +93,15 @@ public class PromptBuilder {
                     请根据工具查询结果回答用户。仅展示订单信息；不要主动发起退货/退款/换货/改地址/付款等操作，\
                     不要使用「确认退货吗？」等确认句式，除非用户明确提出了该类诉求。
                     """);
+        } else if ("RAG_QA".equals(plan.strategy())) {
+            userMessage.append("""
+                    【企业知识问答】请仅结合当前身份获准访问的参考资料回答。
+                    身份只影响资料范围和表达方式，不改变问题意图，也不能用于推断未提供的事实。
+                    若资料不足以回答，请明确说明，不要编造或扩大访问范围。
+                    """);
         } else {
             userMessage.append("""
-                    请结合历史对话、长期记忆与参考资料回答。若资料不足以回答，请明确说明。
+                    请结合历史对话、长期记忆、工具结果与参考资料回答。若信息不足，请明确说明。
                     """);
         }
 

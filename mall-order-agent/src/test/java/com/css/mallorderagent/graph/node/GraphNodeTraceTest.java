@@ -8,6 +8,7 @@ import com.css.mallorderagent.planner.PlanResult;
 import com.css.mallorderagent.planner.executor.ActionExecutorRegistry;
 import com.css.mallorderagent.tool.SensitiveOrderOperationExecutor;
 import com.css.mallorderagent.tool.SensitiveOperationResult;
+import com.css.mallorderagent.tool.client.OrderMcpToolException;
 import com.example.mallordermemory.memory.HybridMemoryManager;
 import com.example.mallordermemory.service.UserProfileService;
 import com.example.mallordermilvusrag.tracing.RagTracingAdvisor;
@@ -166,6 +167,45 @@ class GraphNodeTraceTest {
         assertEquals(7, end.getAttributes().get("resultLength"));
         assertEquals(true, end.getAttributes().get("grounded"));
         assertEquals("SUCCEEDED", end.getAttributes().get("executionStatus"));
+    }
+
+    @Test
+    void sensitiveBusinessRejectionRemainsGroundedAndObservable() {
+        SensitiveOrderOperationExecutor executor = mock(SensitiveOrderOperationExecutor.class);
+        when(executor.execute(any())).thenReturn(SensitiveOperationResult.rejected(
+                "退货", "ORD20260810003", "USER1002", "退货申请未提交：该订单已超过7天退货期限"));
+        SensitiveOperationNode node = new SensitiveOperationNode(executor);
+        List<TraceEvent> events = new ArrayList<>();
+
+        traced(events, () -> node.apply(new OverAllState(Map.of(
+                AgentGraphKeys.SESSION_ID, "conversation-001",
+                AgentGraphKeys.PLAN_STRATEGY, "DANGEROUS_ORDER_OP",
+                AgentGraphKeys.USER_ID, "USER1002"))));
+
+        TraceEvent end = spanEnd(events, SensitiveOperationNode.NODE_NAME);
+        assertEquals("OK", end.getStatus());
+        assertEquals(false, end.getAttributes().get("success"));
+        assertEquals(true, end.getAttributes().get("grounded"));
+        assertEquals("REJECTED", end.getAttributes().get("executionStatus"));
+    }
+
+    @Test
+    void handledMcpFailureMarksSensitiveSpanAsError() {
+        SensitiveOrderOperationExecutor executor = mock(SensitiveOrderOperationExecutor.class);
+        OrderMcpToolException failure = new OrderMcpToolException("connection refused");
+        when(executor.execute(any())).thenReturn(SensitiveOperationResult.technicalFailure(
+                "退货", "ORD20260810003", "USER1002",
+                "退货执行失败：订单 MCP 服务暂时不可用，请稍后重试。", failure));
+        SensitiveOperationNode node = new SensitiveOperationNode(executor);
+        List<TraceEvent> events = new ArrayList<>();
+
+        traced(events, () -> node.apply(new OverAllState(Map.of())));
+
+        TraceEvent end = spanEnd(events, SensitiveOperationNode.NODE_NAME);
+        assertEquals("ERROR", end.getStatus());
+        assertEquals("OrderMcpToolException", end.getErrorMessage());
+        assertEquals(false, end.getAttributes().get("grounded"));
+        assertEquals("FAILED", end.getAttributes().get("executionStatus"));
     }
 
     @Test

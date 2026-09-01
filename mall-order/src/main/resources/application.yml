@@ -6,7 +6,7 @@ spring:
   application:
     name: mall-order
   datasource:
-    url: ${MALL_ORDER_DATASOURCE_URL:jdbc:mysql://127.0.0.1:13306/products?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
+    url: ${MALL_ORDER_DATASOURCE_URL:jdbc:mysql://127.0.0.1:3306/products?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
     username: ${MYSQL_USER:portfolio}
     password: ${MYSQL_PASSWORD:portfolio}
     driver-class-name: com.mysql.cj.jdbc.Driver

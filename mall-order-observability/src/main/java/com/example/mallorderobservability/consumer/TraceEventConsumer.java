@@ -30,6 +30,12 @@ public class TraceEventConsumer implements RocketMQListener<String> {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * 反序列化 RocketMQ 消息并写入 Elasticsearch。写入失败时抛出异常，
+     * 让消息消费框架按其重试策略重新投递。
+     *
+     * @param message Trace 事件 JSON
+     */
     @Override
     public void onMessage(String message) {
         try {

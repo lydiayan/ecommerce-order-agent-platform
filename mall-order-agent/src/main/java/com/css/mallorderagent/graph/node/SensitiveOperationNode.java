@@ -31,6 +31,12 @@ public class SensitiveOperationNode implements NodeAction {
         this.sensitiveOrderOperationExecutor = sensitiveOrderOperationExecutor;
     }
 
+    /**
+     * 在人工批准后调用敏感订单执行器，并把成功、业务拒绝或技术失败写入回答。
+     *
+     * @param state 包含已批准操作、订单上下文和用户身份的 Graph 状态
+     * @return 工具结果、最终回答和 grounded 标记
+     */
     @Override
     public Map<String, Object> apply(OverAllState state) {
         Map<String, Object> startAttributes = new LinkedHashMap<>();
@@ -45,10 +51,13 @@ public class SensitiveOperationNode implements NodeAction {
             try {
                 SensitiveOperationResult result = sensitiveOrderOperationExecutor.execute(state);
                 sensitiveOperationSpan.attribute("resultLength", result.message().length());
-                sensitiveOperationSpan.attribute("grounded", result.success());
+                sensitiveOperationSpan.attribute("grounded", result.grounded());
                 sensitiveOperationSpan.attribute("success", result.success());
-                sensitiveOperationSpan.attribute("executionStatus", result.success() ? "SUCCEEDED" : "FAILED");
+                sensitiveOperationSpan.attribute("executionStatus", result.outcome());
                 sensitiveOperationSpan.attribute("operation", result.operation());
+                if (result.error() != null) {
+                    sensitiveOperationSpan.error(result.error());
+                }
                 if (result.orderId() != null) {
                     sensitiveOperationSpan.attribute("orderFingerprint", TracePrivacy.fingerprint(result.orderId()));
                 }
@@ -60,7 +69,7 @@ public class SensitiveOperationNode implements NodeAction {
                 return Map.of(
                         AgentGraphKeys.ANSWER, result.message(),
                         AgentGraphKeys.TOOL_RESULT, result.message(),
-                        AgentGraphKeys.GROUNDED, result.success());
+                        AgentGraphKeys.GROUNDED, result.grounded());
             } catch (RuntimeException e) {
                 sensitiveOperationSpan.error(e);
                 throw e;

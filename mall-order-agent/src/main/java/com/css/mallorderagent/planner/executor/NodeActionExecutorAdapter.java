@@ -16,6 +16,12 @@ public final class NodeActionExecutorAdapter implements ActionExecutor {
         this.delegate = delegate;
     }
 
+    /**
+     * 执行底层 Graph 节点，并将受检异常统一包装为执行失败异常。
+     *
+     * @param state 当前 Graph 全局状态
+     * @return 节点产生的状态增量
+     */
     @Override
     public Map<String, Object> execute(OverAllState state) {
         try {

@@ -40,12 +40,25 @@ public class AuthController {
         this.authProperties = authProperties;
     }
 
+    /**
+     * 获取当前会话的 CSRF 令牌，供浏览器在后续写请求中携带。
+     *
+     * @param token Spring Security 为当前请求生成或恢复的 CSRF 令牌
+     * @return CSRF 请求头名称和令牌值
+     */
     @GetMapping("/csrf")
     public Map<String, Object> csrf(CsrfToken token) {
         return Map.of("code", 200, "message", "success", "data", Map.of(
                 "headerName", token.getHeaderName(), "token", token.getToken()));
     }
 
+    /**
+     * 查询当前登录账户、业务身份、角色以及演示身份代入状态。
+     *
+     * @param principal 当前登录身份
+     * @param request 当前 HTTP 请求，用于读取会话中的身份代入到期时间
+     * @return 当前用户及会话安全状态
+     */
     @GetMapping("/me")
     public Map<String, Object> me(@AuthenticationPrincipal SecurityUserPrincipal principal,
                                   HttpServletRequest request) {
@@ -66,6 +79,14 @@ public class AuthController {
         return Map.of("code", 200, "message", "success", "data", data);
     }
 
+    /**
+     * 校验当前密码和密码策略后修改登录密码，并使当前会话失效。
+     *
+     * @param principal 当前登录身份，用于定位待修改账户
+     * @param request 当前密码和新密码
+     * @param servletRequest 当前 HTTP 请求，用于记录审计并注销会话
+     * @return 密码修改成功并提示重新登录的响应
+     */
     @PostMapping("/change-password")
     public Map<String, Object> changePassword(@AuthenticationPrincipal SecurityUserPrincipal principal,
                                               @RequestBody ChangePasswordRequest request,

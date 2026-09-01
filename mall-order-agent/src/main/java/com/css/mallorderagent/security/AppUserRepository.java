@@ -20,6 +20,12 @@ public class AppUserRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
+    /**
+     * 按不区分大小写的用户名查询认证账户及其展示身份。
+     *
+     * @param username 用户名
+     * @return 账户记录，不存在时为空
+     */
     public Optional<UserRow> findByUsername(String username) {
         List<UserRow> rows = jdbcTemplate.query("""
                 SELECT u.id, u.username, u.password_hash, u.actor_user_id, u.enabled,
@@ -38,6 +44,12 @@ public class AppUserRepository {
         return rows.stream().findFirst();
     }
 
+    /**
+     * 按账户主键查询认证账户及其展示身份。
+     *
+     * @param userId 账户主键
+     * @return 账户记录，不存在时为空
+     */
     public Optional<UserRow> findById(long userId) {
         List<UserRow> rows = jdbcTemplate.query("""
                 SELECT u.id, u.username, u.password_hash, u.actor_user_id, u.enabled,
@@ -56,12 +68,24 @@ public class AppUserRepository {
         return rows.stream().findFirst();
     }
 
+    /**
+     * 查询账户拥有的角色编码并保持数据库排序。
+     *
+     * @param userId 账户主键
+     * @return 去重后的角色编码
+     */
     public Set<String> findRoles(long userId) {
         return new LinkedHashSet<>(jdbcTemplate.queryForList("""
                 SELECT role_code FROM app_user_role WHERE user_id = ? ORDER BY role_code
                 """, String.class, userId));
     }
 
+    /**
+     * 查询账户通过角色获得的能力集合。
+     *
+     * @param userId 账户主键
+     * @return 去重并排序后的能力编码
+     */
     public List<String> findRoleCapabilities(long userId) {
         return jdbcTemplate.queryForList("""
                 SELECT DISTINCT rc.capability
@@ -72,6 +96,12 @@ public class AppUserRepository {
                 """, String.class, userId);
     }
 
+    /**
+     * 查询业务身份自身拥有的能力，用于与角色能力共同构建授权上下文。
+     *
+     * @param actorUserId 业务身份编号
+     * @return 排序后的能力编码；身份为空时返回空列表
+     */
     public List<String> findActorCapabilities(String actorUserId) {
         if (actorUserId == null || actorUserId.isBlank()) return List.of();
         return jdbcTemplate.queryForList("""
@@ -80,12 +110,23 @@ public class AppUserRepository {
                 """, String.class, actorUserId);
     }
 
+    /**
+     * 读取账户当前认证版本，用于使旧会话或旧令牌失效。
+     *
+     * @param userId 账户主键
+     * @return 当前版本；查询结果为空时返回 {@code -1}
+     */
     public long currentAuthVersion(long userId) {
         Long version = jdbcTemplate.queryForObject(
                 "SELECT auth_version FROM app_user WHERE id = ?", Long.class, userId);
         return version != null ? version : -1;
     }
 
+    /**
+     * 记录登录成功时间，并清除账户级失败次数和锁定状态。
+     *
+     * @param userId 账户主键
+     */
     public void recordLoginSuccess(long userId) {
         jdbcTemplate.update("""
                 UPDATE app_user SET failed_login_count = 0, locked_until = NULL,
@@ -93,6 +134,14 @@ public class AppUserRepository {
                 """, userId);
     }
 
+    /**
+     * 累加账户级登录失败次数，并在达到阈值后设置锁定截止时间。
+     *
+     * @param username 用户名
+     * @param maxFailures 触发锁定的失败次数
+     * @param lockSeconds 锁定秒数
+     * @return 更新后的失败次数；账户不存在时返回 0
+     */
     public int recordLoginFailure(String username, int maxFailures, long lockSeconds) {
         jdbcTemplate.update("""
                 UPDATE app_user
@@ -104,6 +153,13 @@ public class AppUserRepository {
         return findByUsername(username).map(UserRow::failedLoginCount).orElse(0);
     }
 
+    /**
+     * 更新密码哈希、清除锁定状态并递增认证版本，使旧认证失效。
+     *
+     * @param userId 账户主键
+     * @param passwordHash 新密码哈希
+     * @param requireChange 下次登录是否仍要求修改密码
+     */
     public void changePassword(long userId, String passwordHash, boolean requireChange) {
         jdbcTemplate.update("""
                 UPDATE app_user SET password_hash = ?, password_change_required = ?,
@@ -112,6 +168,15 @@ public class AppUserRepository {
                 """, passwordHash, requireChange, userId);
     }
 
+    /**
+     * 幂等写入预置账户，并确保账户关联指定角色。
+     *
+     * @param username 用户名
+     * @param passwordHash 密码哈希
+     * @param actorUserId 绑定的业务身份编号
+     * @param roleCode 角色编码
+     * @param passwordChangeRequired 首次登录是否必须改密
+     */
     public void seedUser(String username, String passwordHash, String actorUserId,
                          String roleCode, boolean passwordChangeRequired) {
         jdbcTemplate.update("""
@@ -126,6 +191,15 @@ public class AppUserRepository {
                 userId, roleCode);
     }
 
+    /**
+     * 在同一事务中创建账户并绑定角色。
+     *
+     * @param username 用户名
+     * @param passwordHash 密码哈希
+     * @param actorUserId 绑定的业务身份编号
+     * @param roleCode 角色编码
+     * @return 新账户主键
+     */
     @Transactional
     public long createUser(String username, String passwordHash, String actorUserId, String roleCode) {
         jdbcTemplate.update("""
@@ -138,6 +212,11 @@ public class AppUserRepository {
         return userId;
     }
 
+    /**
+     * 查询全部账户及其角色和最近认证状态，供管理界面展示。
+     *
+     * @return 按用户名排序的账户摘要
+     */
     public List<UserSummary> findAll() {
         return jdbcTemplate.query("""
                 SELECT u.id, u.username, u.actor_user_id, i.display_name, u.enabled,
@@ -154,11 +233,22 @@ public class AppUserRepository {
                 toLocalDateTime(rs.getTimestamp("updated_at")), findRoles(rs.getLong("id"))));
     }
 
+    /**
+     * 启用或停用账户，并递增认证版本使现有认证失效。
+     *
+     * @param userId 账户主键
+     * @param enabled 是否启用
+     */
     public void setEnabled(long userId, boolean enabled) {
         jdbcTemplate.update("UPDATE app_user SET enabled = ?, auth_version = auth_version + 1 WHERE id = ?",
                 enabled, userId);
     }
 
+    /**
+     * 清除账户锁定状态，并递增认证版本。
+     *
+     * @param userId 账户主键
+     */
     public void unlock(long userId) {
         jdbcTemplate.update("""
                 UPDATE app_user SET failed_login_count = 0, locked_until = NULL,
@@ -173,6 +263,11 @@ public class AppUserRepository {
     public record UserRow(long id, String username, String passwordHash, String actorUserId,
                           String displayName, boolean enabled, boolean passwordChangeRequired,
                           int failedLoginCount, LocalDateTime lockedUntil, long authVersion) {
+        /**
+         * 判断账户锁定截止时间是否已经过去。
+         *
+         * @return 当前允许认证时返回 {@code true}
+         */
         public boolean accountNonLocked() {
             return lockedUntil == null || lockedUntil.isBefore(LocalDateTime.now());
         }

@@ -30,6 +30,12 @@ public class RefundEligibilityToolExecutor implements ActionExecutor {
         this.orderMcpToolClient = orderMcpToolClient;
     }
 
+    /**
+     * 解析退款事实并通过 MCP 对授权范围内的订单执行资格评估。
+     *
+     * @param state 包含问题、订单号和授权客户范围的 Graph 状态
+     * @return 权威资格判断文本与 grounded 标记
+     */
     @Override
     public Map<String, Object> execute(OverAllState state) {
         RagTraceScope parentTrace = RagTracingAdvisor.parentScope();

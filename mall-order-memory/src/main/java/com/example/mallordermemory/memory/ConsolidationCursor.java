@@ -21,6 +21,11 @@ public class ConsolidationCursor {
         this.pendingTokens = pendingTokens;
     }
 
+    /**
+     * 创建尚未合并任何消息的空游标。
+     *
+     * @return 空游标
+     */
     public static ConsolidationCursor empty() {
         return new ConsolidationCursor(null, 0, 0);
     }
@@ -49,11 +54,20 @@ public class ConsolidationCursor {
         this.pendingTokens = pendingTokens;
     }
 
+    /**
+     * 累加自上次合并以来的消息数和估算 Token 数。
+     *
+     * @param messages 新增消息数
+     * @param tokens 新增估算 Token 数
+     */
     public void addPending(int messages, int tokens) {
         this.pendingMessages += messages;
         this.pendingTokens += tokens;
     }
 
+    /**
+     * 合并成功后清零待处理统计，保留最后消息游标。
+     */
     public void resetPending() {
         this.pendingMessages = 0;
         this.pendingTokens = 0;

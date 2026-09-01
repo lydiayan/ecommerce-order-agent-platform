@@ -1,5 +1,6 @@
 package com.css.mallorderagent.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.example.mallordermilvusrag.dto.SearchResponse;
 
 /**
@@ -7,6 +8,8 @@ import com.example.mallordermilvusrag.dto.SearchResponse;
  */
 public class OrderAgentResponse {
 
+    private String responseId;
+    private boolean feedbackEnabled;
     private String query;
     private String answer;
     private boolean grounded;
@@ -14,7 +17,15 @@ public class OrderAgentResponse {
     private String conversationId;
     /** Planner 选定的策略，如 RAG_QA */
     private String planStrategy;
+    private String intent;
+    private String intentSource;
+    private double intentConfidence;
+    private String ruleMatchStatus;
+    private boolean clarificationRequired;
     private SearchResponse retrieval;
+
+    /** Internal diagnostic snapshot; never returned to end users. */
+    private String toolSummary;
 
     /** Graph 是否在 human 节点前中断，等待人工审核 */
     private boolean interrupted;
@@ -33,6 +44,22 @@ public class OrderAgentResponse {
 
     /** 是否等待用户在对话中回复确认/取消（敏感订单操作） */
     private boolean awaitingUserConfirm;
+
+    public String getResponseId() {
+        return responseId;
+    }
+
+    public void setResponseId(String responseId) {
+        this.responseId = responseId;
+    }
+
+    public boolean isFeedbackEnabled() {
+        return feedbackEnabled;
+    }
+
+    public void setFeedbackEnabled(boolean feedbackEnabled) {
+        this.feedbackEnabled = feedbackEnabled;
+    }
 
     public boolean isAwaitingUserConfirm() {
         return awaitingUserConfirm;
@@ -90,12 +117,61 @@ public class OrderAgentResponse {
         this.planStrategy = planStrategy;
     }
 
+    public String getIntent() {
+        return intent;
+    }
+
+    public void setIntent(String intent) {
+        this.intent = intent;
+    }
+
+    public String getIntentSource() {
+        return intentSource;
+    }
+
+    public void setIntentSource(String intentSource) {
+        this.intentSource = intentSource;
+    }
+
+    public double getIntentConfidence() {
+        return intentConfidence;
+    }
+
+    public void setIntentConfidence(double intentConfidence) {
+        this.intentConfidence = intentConfidence;
+    }
+
+    public String getRuleMatchStatus() {
+        return ruleMatchStatus;
+    }
+
+    public void setRuleMatchStatus(String ruleMatchStatus) {
+        this.ruleMatchStatus = ruleMatchStatus;
+    }
+
+    public boolean isClarificationRequired() {
+        return clarificationRequired;
+    }
+
+    public void setClarificationRequired(boolean clarificationRequired) {
+        this.clarificationRequired = clarificationRequired;
+    }
+
     public SearchResponse getRetrieval() {
         return retrieval;
     }
 
     public void setRetrieval(SearchResponse retrieval) {
         this.retrieval = retrieval;
+    }
+
+    @JsonIgnore
+    public String getToolSummary() {
+        return toolSummary;
+    }
+
+    public void setToolSummary(String toolSummary) {
+        this.toolSummary = toolSummary;
     }
 
     public boolean isInterrupted() {

@@ -11,6 +11,11 @@ public class LoggingTracePublisher implements TracePublisher {
 
     private static final Logger log = LoggerFactory.getLogger(LoggingTracePublisher.class);
 
+    /**
+     * 将 Trace 事件序列化为结构化日志，作为未配置 MQ 或 MQ 投递失败时的本地证据。
+     *
+     * @param event Trace 事件
+     */
     @Override
     public void publish(TraceEvent event) {
         log.info("trace event type={} traceId={} spanId={} op={} status={} durationMs={}",

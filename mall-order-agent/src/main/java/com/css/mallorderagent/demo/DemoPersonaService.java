@@ -20,14 +20,32 @@ public class DemoPersonaService {
         this.mallOrderClient = mallOrderClient;
     }
 
+    /**
+     * 查询所有启用的演示身份，并补齐其知识范围、能力和推荐问题。
+     *
+     * @return 可供身份选择界面展示的演示身份
+     */
     public List<DemoPersonaView> findAll() {
         return repository.findAllActive().stream().map(this::toView).toList();
     }
 
+    /**
+     * 查询指定启用的演示身份，不存在或参数为空时返回对应 HTTP 错误。
+     *
+     * @param actorUserId 业务身份编号
+     * @return 完整演示身份视图
+     */
     public DemoPersonaView requirePersona(String actorUserId) {
         return toView(requireRow(actorUserId));
     }
 
+    /**
+     * 将演示身份转换为 Agent 执行所需的授权上下文和身份提示词。
+     * 客户只能访问自己，销售只能访问明确分配的客户。
+     *
+     * @param actorUserId 业务身份编号
+     * @return 包含能力、客户范围和知识范围的执行上下文
+     */
     public DemoActorContext resolveActor(String actorUserId) {
         DemoPersonaView persona = requirePersona(actorUserId);
         List<String> customerIds = switch (persona.category()) {
@@ -46,6 +64,12 @@ public class DemoPersonaService {
                 persona.roleScopes(), persona.departmentScopes());
     }
 
+    /**
+     * 组装演示工作台数据；员工视角的客户订单会隐藏手机号和地址。
+     *
+     * @param actorUserId 业务身份编号
+     * @return 身份信息、可见订单、知识范围和推荐问题
+     */
     public DemoWorkspace getWorkspace(String actorUserId) {
         DemoPersonaView persona = requirePersona(actorUserId);
         List<DemoWorkspace.CustomerOrders> customers = switch (persona.category()) {
@@ -70,6 +94,11 @@ public class DemoPersonaService {
                 persona.suggestions());
     }
 
+    /**
+     * 查询全部业务身份编号，主要用于演示环境批量重置。
+     *
+     * @return 排序后的身份编号
+     */
     public List<String> findAllActorUserIds() {
         return repository.findAllActorUserIds();
     }
@@ -100,6 +129,12 @@ public class DemoPersonaService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "demo persona not found"));
     }
 
+    /**
+     * 复制订单并隐藏员工视角不应直接展示的手机号和收货地址。
+     *
+     * @param source 原始订单
+     * @return 脱敏后的订单副本
+     */
     public static MallOrderDto maskOrderForStaff(MallOrderDto source) {
         MallOrderDto masked = new MallOrderDto();
         masked.setOrderId(source.getOrderId());

@@ -62,12 +62,50 @@ public class OrderAgentService {
         this.demoPersonaService = demoPersonaService;
     }
 
+    /**
+     * 以允许敏感操作确认的默认策略同步执行一次 Agent 问答。
+     *
+     * @param request 用户问题、会话编号和 RAG 检索参数
+     * @param actorUserId 当前业务身份编号，用于限定能力和数据范围
+     * @return Agent 回答、规划结果、Trace 信息和可能的人工确认状态
+     */
     public OrderAgentResponse ask(AskRequest request, String actorUserId) {
         return ask(request, actorUserId, true);
     }
 
+    /**
+     * 按指定安全策略同步执行一次 Agent 问答。
+     *
+     * @param request 用户问题、会话编号和 RAG 检索参数
+     * @param actorUserId 当前业务身份编号
+     * @param sensitiveConfirmationAllowed 当前身份是否允许确认或取消敏感业务操作
+     * @return Agent 回答、规划结果、Trace 信息和可能的人工确认状态
+     */
     public OrderAgentResponse ask(AskRequest request, String actorUserId,
                                   boolean sensitiveConfirmationAllowed) {
+        return ask(request, actorUserId, sensitiveConfirmationAllowed, null);
+    }
+
+    /**
+     * 执行流式 Agent 问答，并将生成增量写入预先注册的 SSE 流会话。
+     *
+     * @param request 用户问题、会话编号和 RAG 检索参数
+     * @param actorUserId 当前业务身份编号
+     * @param sensitiveConfirmationAllowed 当前身份是否允许确认或取消敏感业务操作
+     * @param streamId 已由流会话注册中心创建的流编号
+     * @return 流式生成结束后的完整 Agent 响应
+     * @throws IllegalArgumentException streamId 为空时抛出
+     */
+    public OrderAgentResponse askStreaming(AskRequest request, String actorUserId,
+                                           boolean sensitiveConfirmationAllowed, String streamId) {
+        if (streamId == null || streamId.isBlank()) {
+            throw new IllegalArgumentException("streamId must not be blank");
+        }
+        return ask(request, actorUserId, sensitiveConfirmationAllowed, streamId);
+    }
+
+    private OrderAgentResponse ask(AskRequest request, String actorUserId,
+                                   boolean sensitiveConfirmationAllowed, String streamId) {
         validateAsk(request);
         String userId = requireActorUserId(actorUserId);
         sanitizeUntrustedRequest(request);
@@ -80,30 +118,39 @@ public class OrderAgentService {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                         "当前身份不能确认或取消敏感业务操作");
             }
-            return handlePendingConfirmationReply(request, userId, sessionId, threadId);
+            return handlePendingConfirmationReply(request, userId, sessionId, threadId, streamId);
         }
 
         if (!ragTraceService.isEnabled()) {
-            return askInternal(request, userId, sessionId, threadId, RagTraceScope.noop());
+            return askInternal(request, userId, sessionId, threadId, RagTraceScope.noop(), streamId);
         }
 
         Map<String, Object> attrs = baseTraceAttributes(sessionId, userId);
         attrs.put("queryLength", request.getQuery().trim().length());
         attrs.put("queryFingerprint", TracePrivacy.fingerprint(request.getQuery().trim()));
+        attrs.put("streaming", streamId != null);
         try (RagTraceScope trace = ragTraceService.begin("agent.ask", attrs)) {
-            OrderAgentResponse response = askInternal(request, userId, sessionId, threadId, trace);
+            OrderAgentResponse response = askInternal(request, userId, sessionId, threadId, trace, streamId);
             response.setTraceId(trace.traceId());
             if (response.getRetrieval() != null) {
                 response.getRetrieval().setTraceId(trace.traceId());
             }
             trace.attribute("grounded", response.isGrounded());
             trace.attribute("planStrategy", response.getPlanStrategy());
+            addIntentTraceAttributes(trace, response);
             trace.attribute("interrupted", response.isInterrupted());
             trace.attribute("responseLength", response.getAnswer() != null ? response.getAnswer().length() : 0);
             return response;
         }
     }
 
+    /**
+     * 使用人工审核结论恢复当前身份拥有的中断 Graph，并建立第二阶段 Trace。
+     *
+     * @param request Graph 线程编号、是否批准和可选修订问题
+     * @param actorUserId 当前业务身份编号，用于校验待确认状态归属
+     * @return 恢复后的回答；流程再次中断时仍会携带人工确认信息
+     */
     public OrderAgentResponse resume(HumanFeedbackRequest request, String actorUserId) {
         validateResume(request);
         String threadId = request.getThreadId().trim();
@@ -125,12 +172,20 @@ public class OrderAgentService {
             response.setTraceId(trace.traceId());
             trace.attribute("grounded", response.isGrounded());
             trace.attribute("planStrategy", response.getPlanStrategy());
+            addIntentTraceAttributes(trace, response);
             trace.attribute("interrupted", response.isInterrupted());
             trace.attribute("responseLength", response.getAnswer() != null ? response.getAnswer().length() : 0);
             return response;
         }
     }
 
+    /**
+     * 放弃当前身份拥有的待确认操作，并清除对应会话的等待状态。
+     *
+     * @param request 包含 Graph 线程编号的放弃请求
+     * @param actorUserId 当前业务身份编号，用于校验待确认状态归属
+     * @return 找到并清除待确认状态后返回 true
+     */
     public boolean abandon(AbandonConversationRequest request, String actorUserId) {
         if (request == null || request.getThreadId() == null || request.getThreadId().isBlank()) {
             throw new IllegalArgumentException("threadId must not be blank");
@@ -148,7 +203,9 @@ public class OrderAgentService {
         RunnableConfig resumeConfig = RunnableConfig.builder()
                 .threadId(threadId)
                 .resume()
-                .addStateUpdate(Map.of(AgentGraphKeys.HUMAN_FEEDBACK, feedback))
+                .addStateUpdate(Map.of(
+                        AgentGraphKeys.HUMAN_FEEDBACK, feedback,
+                        AgentGraphKeys.STREAM_ID, ""))
                 .build();
 
         log.info("Resume graph, threadId={}, approved={}, revised={}",
@@ -170,8 +227,8 @@ public class OrderAgentService {
     }
 
     private OrderAgentResponse askInternal(AskRequest request, String userId, String sessionId,
-                                           String threadId, RagTraceScope trace) {
-        Map<String, Object> inputs = buildGraphInputs(request, userId, sessionId);
+                                           String threadId, RagTraceScope trace, String streamId) {
+        Map<String, Object> inputs = buildGraphInputs(request, userId, sessionId, streamId);
 
         RunnableConfig config = RunnableConfig.builder().threadId(threadId).build();
         RagTracingAdvisor.bindParentScope(trace);
@@ -201,7 +258,8 @@ public class OrderAgentService {
         return new GraphRunResult(output, state, interrupted);
     }
 
-    private Map<String, Object> buildGraphInputs(AskRequest request, String userId, String sessionId) {
+    private Map<String, Object> buildGraphInputs(AskRequest request, String userId, String sessionId,
+                                                  String streamId) {
         Map<String, Object> inputs = new HashMap<>();
         inputs.put(AgentGraphKeys.ASK_REQUEST, request);
         inputs.put(AgentGraphKeys.QUERY, request.getQuery().trim());
@@ -215,6 +273,7 @@ public class OrderAgentService {
         inputs.put(AgentGraphKeys.AUTHORIZED_CUSTOMER_IDS, actor.authorizedCustomerIds());
         inputs.put(AgentGraphKeys.RAG_ROLE_SCOPES, actor.roleScopes());
         inputs.put(AgentGraphKeys.RAG_DEPARTMENT_SCOPES, actor.departmentScopes());
+        inputs.put(AgentGraphKeys.STREAM_ID, streamId != null ? streamId : "");
         return inputs;
     }
 
@@ -235,7 +294,13 @@ public class OrderAgentService {
         response.setAnswer(answer);
         response.setGrounded(grounded);
         response.setPlanStrategy(planStrategy);
+        response.setIntent(state.value(AgentGraphKeys.INTENT, ""));
+        response.setIntentSource(state.value(AgentGraphKeys.INTENT_SOURCE, ""));
+        response.setIntentConfidence(state.value(AgentGraphKeys.INTENT_CONFIDENCE, 0D));
+        response.setRuleMatchStatus(state.value(AgentGraphKeys.RULE_MATCH_STATUS, ""));
+        response.setClarificationRequired(state.value(AgentGraphKeys.CLARIFICATION_REQUIRED, false));
         response.setRetrieval(retrieval);
+        response.setToolSummary(state.value(AgentGraphKeys.TOOL_RESULT, ""));
         response.setInterrupted(interrupted);
         response.setThreadId(threadId);
         response.setApprovalReason(state.value(AgentGraphKeys.APPROVAL_REASON, ""));
@@ -243,8 +308,19 @@ public class OrderAgentService {
         return response;
     }
 
+    private static void addIntentTraceAttributes(RagTraceScope trace, OrderAgentResponse response) {
+        trace.attribute("intent", response.getIntent() != null ? response.getIntent() : "");
+        trace.attribute("intentSource",
+                response.getIntentSource() != null ? response.getIntentSource() : "");
+        trace.attribute("intentConfidence", response.getIntentConfidence());
+        trace.attribute("ruleMatchStatus",
+                response.getRuleMatchStatus() != null ? response.getRuleMatchStatus() : "");
+        trace.attribute("clarificationRequired", response.isClarificationRequired());
+    }
+
     private OrderAgentResponse handlePendingConfirmationReply(AskRequest request, String userId,
-                                                               String sessionId, String threadId) {
+                                                               String sessionId, String threadId,
+                                                               String streamId) {
         ConfirmationIntent intent = HumanApprovalDetector.parseUserConfirmationIntent(request.getQuery());
         if (intent == ConfirmationIntent.CONFIRM) {
             HumanFeedbackRequest resumeRequest = new HumanFeedbackRequest();
@@ -261,7 +337,7 @@ public class OrderAgentService {
 
         pendingConfirmationService.clear(threadId);
         log.info("Pending confirmation abandoned, sessionId={}, newQuery='{}'", sessionId, request.getQuery());
-        return askInternal(request, userId, sessionId, threadId, RagTraceScope.noop());
+        return askInternal(request, userId, sessionId, threadId, RagTraceScope.noop(), streamId);
     }
 
     private void finalizeAwaitingConfirmation(OrderAgentResponse response,

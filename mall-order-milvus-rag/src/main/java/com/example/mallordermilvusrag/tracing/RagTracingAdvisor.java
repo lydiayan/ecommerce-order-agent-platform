@@ -70,6 +70,9 @@ public class RagTracingAdvisor implements BaseAdvisor {
         }
     }
 
+    /**
+     * 清除当前线程绑定的父 Trace 作用域，防止线程复用时串联无关请求。
+     */
     public static void clearParentScope() {
         PARENT_SCOPE.remove();
     }
@@ -85,6 +88,7 @@ public class RagTracingAdvisor implements BaseAdvisor {
 
     // ── Advisor identity ─────────────────────────────────────────────────
 
+
     @Override
     public String getName() {
         return "rag-tracing";
@@ -97,6 +101,13 @@ public class RagTracingAdvisor implements BaseAdvisor {
 
     // ── Hooks ────────────────────────────────────────────────────────────
 
+    /**
+     * 包装同步模型调用，使异常也会标记并关闭 LLM Span。
+     *
+     * @param request ChatClient 请求
+     * @param chain 同步调用链
+     * @return ChatClient 响应
+     */
     @Override
     public ChatClientRequest before(ChatClientRequest request, AdvisorChain chain) {
         if (!ragTraceService.isEnabled()) {
@@ -157,6 +168,12 @@ public class RagTracingAdvisor implements BaseAdvisor {
                 .build();
     }
 
+    /**
+     * 包装流式模型调用，在错误或流结束时关闭 LLM Span。
+     *
+     * @param chain 流式调用链
+     * @return 带 Trace 生命周期处理的响应流
+     */
     @Override
     public ChatClientResponse after(ChatClientResponse response, AdvisorChain chain) {
         Object spanObj = response.context().get(SPAN_KEY);

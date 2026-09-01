@@ -14,6 +14,12 @@ public enum AfterSalesStatus {
     REFUNDED,
     CLOSED;
 
+    /**
+     * 判断当前售后状态是否允许迁移到目标状态。
+     *
+     * @param target 目标状态
+     * @return 状态机允许该迁移时返回 {@code true}
+     */
     public boolean canTransitionTo(AfterSalesStatus target) {
         return allowedTargets().contains(target);
     }

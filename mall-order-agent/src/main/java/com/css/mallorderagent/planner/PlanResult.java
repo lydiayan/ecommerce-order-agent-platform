@@ -17,6 +17,16 @@ public class PlanResult {
     private boolean humanApprovalRequired;
     /** 人工审核原因说明（展示给审核人） */
     private String approvalReason;
+    /** 归一化意图，如 ORDER_QUERY */
+    private String intent;
+    /** 最终分类来源：RULE、LLM 或 FALLBACK */
+    private String intentSource;
+    private double intentConfidence;
+    private String ruleMatchStatus;
+    private boolean clarificationRequired;
+    /** 仅记录稳定原因码，不记录模型推理内容。 */
+    private String classificationFallbackReason;
+    private String clarificationMessage;
 
     public PlanResult() {
     }
@@ -65,12 +75,96 @@ public class PlanResult {
         this.approvalReason = approvalReason;
     }
 
+    public String getIntent() {
+        return intent;
+    }
+
+    public void setIntent(String intent) {
+        this.intent = intent;
+    }
+
+    public String getIntentSource() {
+        return intentSource;
+    }
+
+    public void setIntentSource(String intentSource) {
+        this.intentSource = intentSource;
+    }
+
+    public double getIntentConfidence() {
+        return intentConfidence;
+    }
+
+    public void setIntentConfidence(double intentConfidence) {
+        this.intentConfidence = intentConfidence;
+    }
+
+    public String getRuleMatchStatus() {
+        return ruleMatchStatus;
+    }
+
+    public void setRuleMatchStatus(String ruleMatchStatus) {
+        this.ruleMatchStatus = ruleMatchStatus;
+    }
+
+    public boolean isClarificationRequired() {
+        return clarificationRequired;
+    }
+
+    public void setClarificationRequired(boolean clarificationRequired) {
+        this.clarificationRequired = clarificationRequired;
+    }
+
+    public String getClassificationFallbackReason() {
+        return classificationFallbackReason;
+    }
+
+    public void setClassificationFallbackReason(String classificationFallbackReason) {
+        this.classificationFallbackReason = classificationFallbackReason;
+    }
+
+    public String getClarificationMessage() {
+        return clarificationMessage;
+    }
+
+    public void setClarificationMessage(String clarificationMessage) {
+        this.clarificationMessage = clarificationMessage;
+    }
+
     public boolean humanApprovalRequired() {
         return humanApprovalRequired;
     }
 
     public String approvalReason() {
         return approvalReason;
+    }
+
+    public String intent() {
+        return intent;
+    }
+
+    public String intentSource() {
+        return intentSource;
+    }
+
+    public double intentConfidence() {
+        return intentConfidence;
+    }
+
+    public String ruleMatchStatus() {
+        return ruleMatchStatus;
+    }
+
+    public boolean clarificationRequired() {
+        return clarificationRequired;
+    }
+
+    public String classificationFallbackReason() {
+        return classificationFallbackReason;
+    }
+
+    public String clarificationMessage() {
+        return clarificationMessage;
     }
 
     public String strategy() {
