@@ -3,6 +3,8 @@ package com.css.mallorderagent.planner;
 import com.css.mallorderagent.config.OrderAgentProperties;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -15,6 +17,23 @@ class DefaultPlannerTest {
     void normalRagQuestionDoesNotRequireApproval() {
         PlanResult plan = planner.plan("退款规则是什么");
         assertFalse(plan.humanApprovalRequired());
+    }
+
+    @Test
+    void enterpriseKnowledgeSuggestionsUseUnifiedRagRules() {
+        List<String> questions = List.of(
+                "代码评审有哪些要求？",
+                "员工年假如何计算？",
+                "Agent 服务异常如何排查？",
+                "销售报价有哪些边界？");
+
+        for (String question : questions) {
+            PlanResult plan = planner.plan(question);
+            assertEquals("RAG_QA", plan.strategy(), question);
+            assertEquals("RULE", plan.intentSource(), question);
+            assertEquals("MATCH", plan.ruleMatchStatus(), question);
+            assertFalse(plan.clarificationRequired(), question);
+        }
     }
 
     @Test
@@ -43,6 +62,14 @@ class DefaultPlannerTest {
     @Test
     void normalOrderQueryDoesNotRequireApproval() {
         PlanResult plan = planner.plan("查询我的订单");
+        assertFalse(plan.humanApprovalRequired());
+        assertEquals("ORDER_QUERY", plan.strategy());
+    }
+
+    @Test
+    void assignedCustomerOrderQueryUsesOrderStrategy() {
+        PlanResult plan = planner.plan("查看我负责客户的订单");
+
         assertFalse(plan.humanApprovalRequired());
         assertEquals("ORDER_QUERY", plan.strategy());
     }
@@ -127,16 +154,40 @@ class DefaultPlannerTest {
     }
 
     @Test
-    void lowConfidenceModelResultRequestsClarification() {
+    void lowConfidenceReadOnlyKnowledgeIntentStillUsesRag() {
         DefaultPlanner modelPlanner = plannerReturning(new IntentModelDecision(
                 IntentType.RAG_QA, 0.62D, false, "weak_match"));
+
+        PlanResult plan = modelPlanner.plan("研发效能成熟度");
+
+        assertEquals("RAG_QA", plan.strategy());
+        assertEquals("LLM", plan.intentSource());
+        assertEquals("low_confidence_read_only_rag", plan.classificationFallbackReason());
+        assertFalse(plan.clarificationRequired());
+    }
+
+    @Test
+    void modelRequestedClarificationStillWinsForAmbiguousKnowledgeQuestion() {
+        DefaultPlanner modelPlanner = plannerReturning(new IntentModelDecision(
+                IntentType.RAG_QA, 0.92D, true, "missing_subject"));
 
         PlanResult plan = modelPlanner.plan("这个怎么办");
 
         assertEquals("CLARIFY_INTENT", plan.strategy());
         assertTrue(plan.actions().isEmpty());
         assertTrue(plan.clarificationRequired());
-        assertTrue(plan.clarificationMessage().contains("请明确说明"));
+        assertEquals("missing_subject", plan.classificationFallbackReason());
+    }
+
+    @Test
+    void lowConfidenceBusinessIntentStillRequestsClarification() {
+        DefaultPlanner modelPlanner = plannerReturning(new IntentModelDecision(
+                IntentType.ORDER_QUERY, 0.62D, false, "weak_match"));
+
+        PlanResult plan = modelPlanner.plan("看看最近买的东西");
+
+        assertEquals("CLARIFY_INTENT", plan.strategy());
+        assertTrue(plan.clarificationRequired());
     }
 
     @Test

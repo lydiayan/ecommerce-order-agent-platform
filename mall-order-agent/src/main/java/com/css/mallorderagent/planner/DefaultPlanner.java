@@ -20,6 +20,16 @@ public class DefaultPlanner implements Planner {
     private static final List<String> ORDER_QUERY_KEYWORDS = List.of(
             "查", "查询", "查看", "状态", "详情", "进度", "到哪");
 
+    private static final List<String> KNOWLEDGE_QUESTION_MARKERS = List.of(
+            "是什么", "什么是", "有哪些", "有什么", "为什么", "如何", "怎么",
+            "要求", "规范", "流程", "制度", "政策", "规则", "标准", "指南",
+            "手册", "注意事项", "介绍", "说明", "区别", "含义", "原理",
+            "最佳实践", "什么时候", "多久");
+
+    private static final List<String> GENERIC_REFERENCE_TOKENS = List.of(
+            "我想知道", "我想了解", "请问", "帮我", "关于", "这个", "那个",
+            "这些", "那些", "这件事", "一下");
+
     private static final List<String> AFTER_SALES_POLICY_KEYWORDS = List.of(
             "退款", "退货", "换货", "售后", "取消", "补偿");
 
@@ -83,7 +93,9 @@ public class DefaultPlanner implements Planner {
         boolean hasAfterSalesTopic = containsAny(text, AFTER_SALES_POLICY_KEYWORDS);
         boolean hasPolicyQuery = containsAny(text, POLICY_QUERY_KEYWORDS);
         boolean hasAfterSalesStatus = containsAny(text, AFTER_SALES_STATUS_KEYWORDS);
+        boolean hasOrderTopic = text.contains("订单");
         boolean hasOrderQuery = containsAny(text, ORDER_KEYWORDS)
+                || (hasOrderTopic && containsAny(text, ORDER_QUERY_KEYWORDS) && !hasPolicyQuery)
                 || (hasOrderId && containsAny(text, ORDER_QUERY_KEYWORDS));
         boolean hasSensitiveTopic = containsAny(text, SENSITIVE_TOPICS);
         boolean hasNegation = containsAny(text, NEGATION_MARKERS);
@@ -109,7 +121,7 @@ public class DefaultPlanner implements Planner {
             return new RuleDecision(RuleMatchStatus.MATCH,
                     IntentType.ORDER_QUERY, 0.98D, false, false);
         }
-        if (containsAny(text, RAG_KEYWORDS)) {
+        if (containsAny(text, RAG_KEYWORDS) || looksLikeKnowledgeQuestion(text)) {
             return new RuleDecision(RuleMatchStatus.MATCH,
                     IntentType.RAG_QA, 0.95D, false, false);
         }
@@ -131,8 +143,7 @@ public class DefaultPlanner implements Planner {
         if (model == null) {
             model = IntentModelDecision.unknown("empty_model_result");
         }
-        if (model.intent() == IntentType.UNKNOWN || model.clarificationRequired()
-                || model.confidence() < intentProperties.getConfidenceThreshold()) {
+        if (model.intent() == IntentType.UNKNOWN || model.clarificationRequired()) {
             String reason = model.reasonCode() != null ? model.reasonCode() : "low_confidence";
             return clarification(rule, IntentSource.LLM, reason, model.confidence());
         }
@@ -149,8 +160,19 @@ public class DefaultPlanner implements Planner {
             return clarification(rule, IntentSource.LLM,
                     "sensitive_rule_conflict", model.confidence());
         }
+        // 只读知识检索允许以较低分类置信度进入 RAG，再由检索命中和授权范围决定能否回答。
+        if (model.confidence() < intentProperties.getConfidenceThreshold()
+                && model.intent() != IntentType.RAG_QA) {
+            String reason = model.reasonCode() != null ? model.reasonCode() : "low_confidence";
+            return clarification(rule, IntentSource.LLM, reason, model.confidence());
+        }
+        String reason = model.reasonCode();
+        if (model.intent() == IntentType.RAG_QA
+                && model.confidence() < intentProperties.getConfidenceThreshold()) {
+            reason = "low_confidence_read_only_rag";
+        }
         return new IntentClassification(model.intent(), IntentSource.LLM, rule.status(),
-                model.confidence(), false, model.reasonCode());
+                model.confidence(), false, reason);
     }
 
     private static IntentClassification clarification(RuleDecision rule, IntentSource source,
@@ -200,6 +222,23 @@ public class DefaultPlanner implements Planner {
 
     private static boolean containsAny(String text, List<String> keywords) {
         return keywords.stream().anyMatch(text::contains);
+    }
+
+    private static boolean looksLikeKnowledgeQuestion(String text) {
+        if (!containsAny(text, KNOWLEDGE_QUESTION_MARKERS)) {
+            return false;
+        }
+        String subject = text;
+        for (String marker : KNOWLEDGE_QUESTION_MARKERS) {
+            subject = subject.replace(marker, "");
+        }
+        for (String token : GENERIC_REFERENCE_TOKENS) {
+            subject = subject.replace(token, "");
+        }
+        long substantiveCharacters = subject.codePoints()
+                .filter(Character::isLetterOrDigit)
+                .count();
+        return substantiveCharacters >= 2;
     }
 
     private record RuleDecision(RuleMatchStatus status, IntentType intent,

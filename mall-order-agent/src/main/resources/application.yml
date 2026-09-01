@@ -1,6 +1,7 @@
 server:
   address: ${SERVER_ADDRESS:127.0.0.1}
   port: ${SERVER_PORT:8087}
+  forward-headers-strategy: framework
 
 spring:
   application:

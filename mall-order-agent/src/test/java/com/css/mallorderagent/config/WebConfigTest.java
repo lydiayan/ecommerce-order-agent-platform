@@ -39,7 +39,7 @@ class WebConfigTest {
     @Test
     void proxiedSamePagePostIsNotRejectedByLocalOnlyCorsMapping() throws Exception {
         mockMvc.perform(post("/agent/test")
-                        .header("Origin", "https://example.trycloudflare.com"))
+                        .header("Origin", "https://demo.example.ts.net"))
                 .andExpect(status().isOk())
                 .andExpect(content().string("ok"));
     }
