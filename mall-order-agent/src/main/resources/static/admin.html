@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>安全管理 · 商城订单 Agent</title>
-  <link rel="stylesheet" href="/auth.css?v=20260827b">
+  <link rel="stylesheet" href="/auth.css?v=20261012b">
 </head>
 <body class="admin-body">
 <header class="admin-header">
@@ -16,6 +16,7 @@
     <button class="tab active" data-tab="users" type="button">账户</button>
     <button class="tab" data-tab="tokens" type="button">评测令牌</button>
     <button class="tab" data-tab="knowledge" type="button">知识库</button>
+    <button class="tab" data-tab="playground" type="button">Agent 调试</button>
     <button class="tab" data-tab="badCases" type="button">Bad Case</button>
     <button class="tab" data-tab="audit" type="button">安全审计</button>
   </nav>
@@ -120,6 +121,77 @@
     </div>
   </section>
 
+  <section class="admin-section playground-section hidden" id="playgroundPanel">
+    <div class="section-heading">
+      <div><h1>Agent 调试</h1><p>以明确的业务身份验证 Skill、知识检索和工具路由</p></div>
+      <button class="secondary compact" id="resetPlayground" type="button">新建会话</button>
+    </div>
+    <p class="notice" id="playgroundNotice" role="status"></p>
+    <div class="playground-workspace">
+      <aside class="playground-config" aria-label="调试身份">
+        <div class="playground-pane-heading"><strong>测试身份</strong><span>权限按身份收敛</span></div>
+        <label class="playground-field">业务身份
+          <select id="playgroundIdentity"></select>
+        </label>
+        <dl class="playground-identity-summary">
+          <div><dt>岗位</dt><dd id="playgroundJob">—</dd></div>
+          <div><dt>部门</dt><dd id="playgroundDepartment">—</dd></div>
+          <div><dt>知识范围</dt><dd id="playgroundScopes">—</dd></div>
+          <div><dt>能力</dt><dd id="playgroundCapabilities">—</dd></div>
+        </dl>
+        <label class="playground-field">RAG 召回条数
+          <input id="playgroundTopK" type="number" min="1" max="10" value="5">
+        </label>
+        <div class="playground-guard"><strong>隔离运行</strong><span>不读写业务记忆，敏感操作只分析不执行</span></div>
+      </aside>
+
+      <div class="playground-conversation">
+        <div class="playground-conversation-heading">
+          <div><strong>临时会话</strong><span id="playgroundSessionId">—</span></div>
+          <span class="playground-run-status" id="playgroundRunStatus">就绪</span>
+        </div>
+        <div class="playground-messages" id="playgroundMessages" aria-live="polite">
+          <div class="playground-empty" id="playgroundEmpty">输入测试问题，结果和执行详情会在当前工作区显示。</div>
+        </div>
+        <form class="playground-composer" id="playgroundForm">
+          <label class="sr-only" for="playgroundQuery">测试问题</label>
+          <textarea id="playgroundQuery" rows="3" maxlength="4000" placeholder="输入需要验证的问题" required></textarea>
+          <div class="playground-run-controls">
+            <label class="playground-search-toggle" title="允许本轮回答搜索互联网公开信息">
+              <input id="playgroundWebSearch" type="checkbox">
+              <span class="playground-switch" aria-hidden="true"></span>
+              <span>联网搜索</span>
+            </label>
+            <button class="primary compact" id="runPlayground" type="submit">运行</button>
+          </div>
+        </form>
+      </div>
+
+      <aside class="playground-inspector" aria-label="执行详情">
+        <div class="playground-pane-heading"><strong>执行详情</strong><span>最近一次运行</span></div>
+        <dl class="playground-diagnostics">
+          <div><dt>策略</dt><dd id="playgroundStrategy">—</dd></div>
+          <div><dt>意图</dt><dd id="playgroundIntent">—</dd></div>
+          <div><dt>分类来源</dt><dd id="playgroundIntentSource">—</dd></div>
+          <div><dt>置信度</dt><dd id="playgroundConfidence">—</dd></div>
+          <div><dt>Skill</dt><dd id="playgroundSkill">未命中</dd></div>
+          <div><dt>Skill 版本</dt><dd id="playgroundSkillVersion">—</dd></div>
+          <div><dt>RAG Grounded</dt><dd id="playgroundGrounded">—</dd></div>
+          <div><dt>联网搜索</dt><dd id="playgroundWebSearchStatus">—</dd></div>
+          <div><dt>Trace ID</dt><dd id="playgroundTrace">—</dd></div>
+        </dl>
+        <div class="playground-detail-block">
+          <strong>工具摘要</strong>
+          <pre id="playgroundToolSummary">—</pre>
+        </div>
+        <div class="playground-detail-block">
+          <strong>检索来源</strong>
+          <div class="playground-sources" id="playgroundSources"><span>—</span></div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
   <section class="admin-section hidden" id="auditPanel">
     <div class="section-heading"><div><h1>安全审计</h1><p>保留 180 天，用户和资源以脱敏指纹显示</p></div><button class="secondary compact" id="refreshAudit" type="button">刷新</button></div>
     <div class="table-wrap"><table><thead><tr><th>时间</th><th>事件</th><th>主体</th><th>资源</th><th>结果</th><th>来源</th></tr></thead><tbody id="auditRows"></tbody></table></div>
@@ -181,9 +253,9 @@
     <label>根因<textarea id="badCaseRootCause" maxlength="2000" rows="3"></textarea></label>
     <label>处理结论<textarea id="badCaseResolution" maxlength="2000" rows="3"></textarea></label>
     <p class="notice" id="badCaseDialogNotice" role="status"></p>
-    <div class="dialog-actions"><button class="secondary compact" id="copyTrace" type="button">复制 Trace</button><button class="primary compact" type="submit">保存</button></div>
+    <div class="dialog-actions"><button class="secondary compact" id="replayBadCase" type="button">在调试台复现</button><button class="secondary compact" id="copyTrace" type="button">复制 Trace</button><button class="primary compact" type="submit">保存</button></div>
   </form>
 </dialog>
-<script src="/admin.js?v=20260827b" defer></script>
+<script src="/admin.js?v=20261012b" defer></script>
 </body>
 </html>

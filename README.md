@@ -82,6 +82,23 @@ RAG、Memory 和 Observability 的生产端以库形式组合进 Agent；实际�
 - `jq`、`curl`、`nc`
 - 可用的 DashScope API Key
 
+### 一键启动
+
+首次启动前，配置 `.env` 并完成一次本机 MySQL 初始化：
+
+```bash
+cp .env.example .env
+./scripts/setup-local-mysql.sh
+```
+
+之后在项目根目录执行：
+
+```bash
+./start.sh
+```
+
+脚本会检查配置和依赖、启动 Docker 基础设施及应用进程，并在服务已运行时直接复用。设置 `OPEN_BROWSER=false` 可禁止自动打开浏览器。
+
 ### 1. 配置环境变量
 
 ```bash
@@ -119,6 +136,31 @@ cp .env.example .env
 脚本默认设置 `SPRING_PROFILES_ACTIVE=demo`。在 IDEA 中可直接运行 `All Applications` Compound；如果 Observability 已经运行，可运行只包含订单、MCP 和 Agent 的 `Core Applications`。四个子配置均启用 `demo` profile。
 
 启动完成后打开 [http://127.0.0.1:8087](http://127.0.0.1:8087)。应用日志位于 `logs/`，PID 位于 `run/`。脚本在安装了 `screen` 的环境中使用独立后台会话托管进程，终端退出后服务仍会运行；其他环境回退到 `nohup`。
+
+### 通过 Tailscale Funnel 公开演示
+
+需要从互联网访问 mall-order-agent 和 AgentInsight 时，使用 Tailscale Funnel。先安装并登录 Tailscale，在 macOS 客户端设置中启用 CLI；同时确保 mall-order-agent 正在监听 `8087`、AgentInsight 前端正在监听 `3000`。公网演示应在 `.env` 中设置 `AGENT_SECURE_COOKIE=true` 并重启 mall-order-agent，使会话 Cookie 仅通过 HTTPS 发送。
+
+```bash
+./scripts/tailscale-funnel.sh start
+```
+
+脚本使用同一个稳定的 Tailscale 设备域名，并在标准 HTTPS `443` 端口建立路径映射：
+
+| 公网地址 | 本地服务 |
+| --- | --- |
+| `https://<device>.<tailnet>.ts.net` | mall-order-agent `127.0.0.1:8087` |
+| `https://<device>.<tailnet>.ts.net/insight/` | AgentInsight UI `127.0.0.1:3000` |
+| `https://<device>.<tailnet>.ts.net/api/` | AgentInsight API 经 Vite 代理到 `127.0.0.1:8080` |
+
+首次执行会要求在 Tailscale 管理页面启用 MagicDNS、HTTPS 和 Funnel。脚本会按路径检查并拒绝覆盖不属于本项目的既有映射；任一新映射失败时会回滚本次已创建的映射。旧版 `8443` AgentInsight 映射仅在目标完全匹配时自动移除。
+
+```bash
+./scripts/tailscale-funnel.sh status
+./scripts/tailscale-funnel.sh stop
+```
+
+Funnel 是公开互联网入口，不提供应用身份认证。mall-order-agent 仍由自身登录保护；AgentInsight 在公网演示前也必须启用访问控制。只需要让已加入同一 tailnet 的设备访问时，应改用 Tailscale Serve。
 
 ### 4. 初始化演示知识库
 

@@ -122,6 +122,38 @@ class PlannerNodeTest {
     }
 
     @Test
+    void skillPlanCannotBypassOrderCapabilityChecks() {
+        PlanResult skillPlan = new PlanResult("SKILL_EXECUTE", ActionDefinitions.orderQueryPipeline());
+        skillPlan.setSkillName("order-explainer");
+        PlannerNode node = new PlannerNode(query -> skillPlan);
+
+        Map<String, Object> result = node.apply(new OverAllState(Map.of(
+                AgentGraphKeys.QUERY, "$order-explainer 查询订单",
+                AgentGraphKeys.CAPABILITIES, List.of("KNOWLEDGE_SEARCH"))));
+
+        assertEquals("CAPABILITY_DENIED", result.get(AgentGraphKeys.PLAN_STRATEGY));
+        assertEquals("当前演示身份没有订单查询能力。请切换到销售或客户身份后重试。",
+                result.get(AgentGraphKeys.ANSWER));
+    }
+
+    @Test
+    void publishesSelectedSkillMetadataIntoGraphState() {
+        PlanResult skillPlan = new PlanResult("SKILL_EXECUTE", ActionDefinitions.ragQaPipeline());
+        skillPlan.setSkillName("refund-explainer");
+        skillPlan.setSkillVersionId(12L);
+        skillPlan.setSkillDigest("c".repeat(64));
+        skillPlan.setSkillInstructions("Explain carefully.");
+        PlannerNode node = new PlannerNode(query -> skillPlan);
+
+        Map<String, Object> result = node.apply(new OverAllState(Map.of(
+                AgentGraphKeys.QUERY, "$refund-explainer explain")));
+
+        assertEquals("refund-explainer", result.get(AgentGraphKeys.SELECTED_SKILL_NAME));
+        assertEquals(12L, result.get(AgentGraphKeys.SELECTED_SKILL_VERSION_ID));
+        assertEquals("Explain carefully.", result.get(AgentGraphKeys.SKILL_INSTRUCTIONS));
+    }
+
+    @Test
     void clearsPreviousTurnOutputsBeforeExecutingNewPlan() {
         PlannerNode node = new PlannerNode(query ->
                 new PlanResult("ORDER_POLICY_QUERY", ActionDefinitions.orderPolicyQueryPipeline()));

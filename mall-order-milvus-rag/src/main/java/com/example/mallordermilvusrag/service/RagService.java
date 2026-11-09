@@ -92,10 +92,19 @@ public class RagService {
 
     @PostConstruct
     void ensureCollection() {
-        R<Boolean> exists = milvusClient.hasCollection(HasCollectionParam.newBuilder()
-                .withCollectionName(collectionName).build());
+        R<Boolean> exists;
+        try {
+            exists = milvusClient.hasCollection(HasCollectionParam.newBuilder()
+                    .withCollectionName(collectionName).build());
+        } catch (RuntimeException e) {
+            log.warn("Milvus is unavailable during RAG initialization; continuing without knowledge search: {}",
+                    e.getMessage());
+            return;
+        }
         if (exists.getStatus() != R.Status.Success.getCode()) {
-            throw new IllegalStateException("Failed to check collection " + collectionName);
+            log.warn("Unable to check RAG collection {}; continuing without knowledge search: {}",
+                    collectionName, exists.getMessage());
+            return;
         }
 
         // 检查集合是否存在
@@ -104,9 +113,18 @@ public class RagService {
                 .build();
 
         if (Boolean.TRUE.equals(exists.getData())) {
-            R<DescribeCollectionResponse> describeResult = milvusClient.describeCollection(describeParam);
+            R<DescribeCollectionResponse> describeResult;
+            try {
+                describeResult = milvusClient.describeCollection(describeParam);
+            } catch (RuntimeException e) {
+                log.warn("Unable to describe RAG collection {}; continuing without knowledge search: {}",
+                        collectionName, e.getMessage());
+                return;
+            }
             if (describeResult.getStatus() != R.Status.Success.getCode()) {
-                throw new IllegalStateException("Failed to describe collection " + collectionName);
+                log.warn("Unable to describe RAG collection {}; continuing without knowledge search: {}",
+                        collectionName, describeResult.getMessage());
+                return;
             }
             Set<String> fields = describeResult.getData().getSchema().getFieldsList().stream()
                     .map(field -> field.getName()).collect(Collectors.toSet());
@@ -114,12 +132,12 @@ public class RagService {
             missing.add("embedding");
             missing.removeAll(fields);
             if (!missing.isEmpty()) {
-                throw new IllegalStateException("Collection " + collectionName
-                        + " uses an incompatible schema; missing fields: " + missing);
+                log.error("Collection {} uses an incompatible schema; missing fields: {}",
+                        collectionName, missing);
+                return;
             }
             log.info("Collection already exists: {}", collectionName);
-            loadCollection();
-            collectionReady = true;
+            collectionReady = loadCollection();
             return;
         }
 
@@ -238,24 +256,33 @@ public class RagService {
         createScalarIndex("chunk_level");
 
         // ── 加载集合到内存 ──
-        loadCollection();
-
-        collectionReady = true;
-        log.info("Collection {} initialized and loaded", collectionName);
+        collectionReady = loadCollection();
+        if (collectionReady) {
+            log.info("Collection {} initialized and loaded", collectionName);
+        }
     }
 
-    private void loadCollection() {
+    private boolean loadCollection() {
         LoadCollectionParam loadParam = LoadCollectionParam.newBuilder()
                 .withCollectionName(collectionName)
                 .withSyncLoad(true)
                 .withSyncLoadWaitingInterval(200L)
                 .withSyncLoadWaitingTimeout(30L)
                 .build();
-        R<RpcStatus> loadResult = milvusClient.loadCollection(loadParam);
-        if (loadResult.getStatus() != R.Status.Success.getCode()) {
-            throw new IllegalStateException("Failed to load collection " + collectionName
-                    + ": " + loadResult.getMessage());
+        R<RpcStatus> loadResult;
+        try {
+            loadResult = milvusClient.loadCollection(loadParam);
+        } catch (RuntimeException e) {
+            log.warn("Unable to load RAG collection {}; knowledge search remains unavailable: {}",
+                    collectionName, e.getMessage());
+            return false;
         }
+        if (loadResult.getStatus() != R.Status.Success.getCode()) {
+            log.warn("Unable to load RAG collection {}; knowledge search remains unavailable: {}",
+                    collectionName, loadResult.getMessage());
+            return false;
+        }
+        return true;
     }
 
     private void createScalarIndex(String fieldName) {
@@ -652,7 +679,16 @@ public class RagService {
         searchBuilder.withExpr(filterExpr == null || filterExpr.isBlank()
                 ? searchableChunks : searchableChunks + " && (" + filterExpr + ")");
 
-        R<SearchResults> searchResult = milvusClient.search(searchBuilder.build());
+        R<SearchResults> searchResult;
+        try {
+            searchResult = milvusClient.search(searchBuilder.build());
+        } catch (RuntimeException e) {
+            // A vector store outage must degrade to an empty knowledge result. The Agent
+            // can still answer from tools or report that knowledge retrieval is unavailable;
+            // propagating the SDK exception would otherwise terminate the SSE stream.
+            log.warn("Milvus search unavailable, returning empty results: {}", e.getMessage());
+            return List.of();
+        }
         if (searchResult.getStatus() != R.Status.Success.getCode()) {
             log.warn("Search failed: {}", searchResult.getMessage());
             return List.of();
@@ -798,7 +834,13 @@ public class RagService {
                 .withOutFields(CHUNK_OUTPUT_FIELDS)
                 .withConsistencyLevel(ConsistencyLevelEnum.EVENTUALLY)
                 .build();
-        R<QueryResults> result = milvusClient.query(param);
+        R<QueryResults> result;
+        try {
+            result = milvusClient.query(param);
+        } catch (RuntimeException e) {
+            log.warn("Milvus parent query unavailable, returning best child chunks: {}", e.getMessage());
+            return Map.of();
+        }
         if (result.getStatus() != R.Status.Success.getCode()) {
             log.warn("Parent query failed: {}", result.getMessage());
             return Map.of();

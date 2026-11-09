@@ -40,6 +40,14 @@ spring:
       repository-type: indexed
 
   ai:
+    # Remote model outages must fail fast so the browser can finish the SSE request
+    # and show an actionable error instead of remaining in "处理中" for minutes.
+    retry:
+      max-attempts: ${AI_RETRY_MAX_ATTEMPTS:1}
+      backoff:
+        initial-interval: ${AI_RETRY_INITIAL_INTERVAL:100ms}
+        multiplier: ${AI_RETRY_BACKOFF_MULTIPLIER:2}
+        max-interval: ${AI_RETRY_MAX_INTERVAL:500ms}
     openai:
       api-key: ${DASHSCOPE_API_KEY:missing}
       base-url: ${DASHSCOPE_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
@@ -107,6 +115,18 @@ agent:
     model: ${AGENT_INTENT_MODEL_NAME:qwen-turbo}
     confidence-threshold: ${AGENT_INTENT_CONFIDENCE_THRESHOLD:0.80}
     max-query-length: ${AGENT_INTENT_MAX_QUERY_LENGTH:2000}
+  skill:
+    enabled: ${AGENT_SKILL_ENABLED:true}
+    storage-directory: ${AGENT_SKILL_STORAGE_DIRECTORY:data/skills}
+    allowed-hosts: ${AGENT_SKILL_ALLOWED_HOSTS:github.com,codeload.github.com,gitlab.com}
+    allow-private-hosts: ${AGENT_SKILL_ALLOW_PRIVATE_HOSTS:false}
+    connect-timeout-millis: ${AGENT_SKILL_CONNECT_TIMEOUT_MILLIS:5000}
+    read-timeout-millis: ${AGENT_SKILL_READ_TIMEOUT_MILLIS:15000}
+    max-redirects: ${AGENT_SKILL_MAX_REDIRECTS:3}
+    max-archive-bytes: ${AGENT_SKILL_MAX_ARCHIVE_BYTES:10485760}
+    max-package-bytes: ${AGENT_SKILL_MAX_PACKAGE_BYTES:2097152}
+    max-file-bytes: ${AGENT_SKILL_MAX_FILE_BYTES:524288}
+    max-files: ${AGENT_SKILL_MAX_FILES:200}
   feedback:
     enabled: ${AGENT_FEEDBACK_ENABLED:true}
     retention-days: ${AGENT_FEEDBACK_RETENTION_DAYS:90}
@@ -149,6 +169,9 @@ memory:
     milvus:
       host: ${MILVUS_HOST:127.0.0.1}
       port: ${MILVUS_PORT:29530}
+      rpc-timeout-millis: ${MILVUS_RPC_TIMEOUT_MILLIS:10000}
+      max-retry-times: ${MILVUS_MAX_RETRY_TIMES:1}
+      retry-interval-millis: ${MILVUS_RETRY_INTERVAL_MILLIS:100}
   extractor:
     enabled: true
   consolidation:

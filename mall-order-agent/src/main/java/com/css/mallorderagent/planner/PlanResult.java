@@ -27,6 +27,10 @@ public class PlanResult {
     /** 仅记录稳定原因码，不记录模型推理内容。 */
     private String classificationFallbackReason;
     private String clarificationMessage;
+    private String skillName;
+    private Long skillVersionId;
+    private String skillDigest;
+    private String skillInstructions;
 
     public PlanResult() {
     }
@@ -131,6 +135,15 @@ public class PlanResult {
         this.clarificationMessage = clarificationMessage;
     }
 
+    public String getSkillName() { return skillName; }
+    public void setSkillName(String skillName) { this.skillName = skillName; }
+    public Long getSkillVersionId() { return skillVersionId; }
+    public void setSkillVersionId(Long skillVersionId) { this.skillVersionId = skillVersionId; }
+    public String getSkillDigest() { return skillDigest; }
+    public void setSkillDigest(String skillDigest) { this.skillDigest = skillDigest; }
+    public String getSkillInstructions() { return skillInstructions; }
+    public void setSkillInstructions(String skillInstructions) { this.skillInstructions = skillInstructions; }
+
     public boolean humanApprovalRequired() {
         return humanApprovalRequired;
     }
@@ -166,6 +179,11 @@ public class PlanResult {
     public String clarificationMessage() {
         return clarificationMessage;
     }
+
+    public String skillName() { return skillName; }
+    public Long skillVersionId() { return skillVersionId; }
+    public String skillDigest() { return skillDigest; }
+    public String skillInstructions() { return skillInstructions; }
 
     public String strategy() {
         return strategy;

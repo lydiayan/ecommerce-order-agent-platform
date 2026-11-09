@@ -90,6 +90,11 @@ public class PlannerNode implements NodeAction {
                     plannerSpan.attribute("classificationFallbackReason",
                             plan.classificationFallbackReason());
                 }
+                if (plan.skillName() != null) {
+                    plannerSpan.attribute("skillName", plan.skillName());
+                    plannerSpan.attribute("skillVersionId", plan.skillVersionId());
+                    plannerSpan.attribute("skillDigest", plan.skillDigest());
+                }
 
                 log.info("PlannerNode completed, strategy={}, actions={}, humanApproval={}",
                         plan.strategy(), plan.actions(), plan.humanApprovalRequired());
@@ -101,6 +106,14 @@ public class PlannerNode implements NodeAction {
                 updates.put(AgentGraphKeys.HUMAN_APPROVAL_REQUIRED, plan.humanApprovalRequired());
                 updates.put(AgentGraphKeys.APPROVAL_REASON,
                         plan.approvalReason() != null ? plan.approvalReason() : "");
+                updates.put(AgentGraphKeys.SELECTED_SKILL_NAME,
+                        plan.skillName() != null ? plan.skillName() : "");
+                updates.put(AgentGraphKeys.SELECTED_SKILL_VERSION_ID,
+                        plan.skillVersionId() != null ? plan.skillVersionId() : 0L);
+                updates.put(AgentGraphKeys.SELECTED_SKILL_DIGEST,
+                        plan.skillDigest() != null ? plan.skillDigest() : "");
+                updates.put(AgentGraphKeys.SKILL_INSTRUCTIONS,
+                        plan.skillInstructions() != null ? plan.skillInstructions() : "");
                 if (plan.clarificationRequired() && plan.clarificationMessage() != null) {
                     updates.put(AgentGraphKeys.ANSWER, plan.clarificationMessage());
                 }
@@ -131,6 +144,10 @@ public class PlannerNode implements NodeAction {
         updates.put(AgentGraphKeys.INTENT_CONFIDENCE, 0D);
         updates.put(AgentGraphKeys.RULE_MATCH_STATUS, "");
         updates.put(AgentGraphKeys.CLARIFICATION_REQUIRED, false);
+        updates.put(AgentGraphKeys.SELECTED_SKILL_NAME, "");
+        updates.put(AgentGraphKeys.SELECTED_SKILL_VERSION_ID, 0L);
+        updates.put(AgentGraphKeys.SELECTED_SKILL_DIGEST, "");
+        updates.put(AgentGraphKeys.SKILL_INSTRUCTIONS, "");
         return updates;
     }
 
@@ -159,9 +176,8 @@ public class PlannerNode implements NodeAction {
         if (!AgentGraphSupport.hasCapabilityContext(state)) {
             return null;
         }
-        if ("ORDER_QUERY".equals(plan.strategy())
-                || "ORDER_POLICY_QUERY".equals(plan.strategy())
-                || "DANGEROUS_ORDER_OP".equals(plan.strategy())) {
+        if (plan.hasAction(com.css.mallorderagent.planner.ActionDefinitions.ORDER_QUERY)
+                || plan.hasAction(com.css.mallorderagent.planner.ActionDefinitions.REFUND_ELIGIBILITY)) {
             boolean canRead = AgentGraphSupport.hasCapability(state, DemoCapability.OWN_ORDER_READ.name())
                     || AgentGraphSupport.hasCapability(state, DemoCapability.ASSIGNED_ORDER_READ.name());
             if (!canRead) {

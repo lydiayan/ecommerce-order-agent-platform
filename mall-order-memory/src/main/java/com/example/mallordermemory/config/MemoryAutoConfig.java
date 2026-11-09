@@ -30,6 +30,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 import java.time.Duration;
+import java.util.concurrent.TimeUnit;
 import java.util.Optional;
 
 /**
@@ -111,7 +112,13 @@ public class MemoryAutoConfig {
                 .withPort(milvus.getPort())
                 .build();
         log.info("Creating memory Milvus client at {}:{}", milvus.getHost(), milvus.getPort());
-        return new MilvusServiceClient(connectParam);
+        MilvusServiceClient client = new MilvusServiceClient(connectParam);
+        // The SDK default retries connection failures many times. That is unsafe for an
+        // interactive Agent request because memory and RAG share this client.
+        return (MilvusServiceClient) client
+                .withRetry(milvus.getMaxRetryTimes())
+                .withRetryInterval(milvus.getRetryIntervalMillis(), TimeUnit.MILLISECONDS)
+                .withTimeout(milvus.getRpcTimeoutMillis(), TimeUnit.MILLISECONDS);
     }
 
     @Bean

@@ -7,6 +7,10 @@ let knowledgeCatalog = [];
 let selectedKnowledgeDocument;
 let pendingKnowledgeFile;
 let knowledgePreview;
+let playgroundIdentities = [];
+let playgroundActorUserId;
+let playgroundConversationId = createPlaygroundConversationId();
+let playgroundBusy = false;
 
 const MAX_RENDERED_CHUNKS = 500;
 
@@ -23,6 +27,12 @@ const BAD_CASE_TRANSITIONS = {
   RESOLVED: ['RESOLVED', 'IN_PROGRESS'],
   IGNORED: ['IGNORED', 'NEW'],
 };
+
+function createPlaygroundConversationId() {
+  const id = globalThis.crypto?.randomUUID?.()
+    || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `admin-playground-${id}`;
+}
 
 async function ensureCsrf() {
   if (csrf) return csrf;
@@ -90,6 +100,7 @@ async function loadUsers() {
 
 async function loadIdentities() {
   const identities = await api('/admin/identities');
+  playgroundIdentities = identities;
   const select = document.getElementById('newIdentity');
   select.replaceChildren();
   identities.forEach((identity) => {
@@ -98,6 +109,17 @@ async function loadIdentities() {
     option.textContent = `${identity.displayName} · ${identity.category} · ${identity.actorUserId}`;
     select.appendChild(option);
   });
+  const playgroundSelect = document.getElementById('playgroundIdentity');
+  playgroundSelect.replaceChildren();
+  identities.forEach((identity) => {
+    const option = document.createElement('option');
+    option.value = identity.actorUserId;
+    option.textContent = `${identity.displayName} · ${identity.category}`;
+    playgroundSelect.appendChild(option);
+  });
+  playgroundActorUserId = playgroundSelect.value || undefined;
+  renderPlaygroundIdentity();
+  resetPlaygroundLocal();
 }
 
 async function setEnabled(user, enabled) {
@@ -574,15 +596,186 @@ function renderKnowledgeChunks(result) {
   list.classList.toggle('hidden', chunks.length === 0);
 }
 
-document.querySelectorAll('.tab').forEach((tab) => tab.addEventListener('click', () => {
-  document.querySelectorAll('.tab').forEach((item) => item.classList.toggle('active', item === tab));
-  ['users', 'tokens', 'knowledge', 'badCases', 'audit'].forEach((name) => {
-    document.getElementById(`${name}Panel`).classList.toggle('hidden', tab.dataset.tab !== name);
+function renderPlaygroundIdentity() {
+  const identity = playgroundIdentities.find((item) => item.actorUserId === playgroundActorUserId);
+  document.getElementById('playgroundJob').textContent = identity?.jobTitle || '—';
+  document.getElementById('playgroundDepartment').textContent = identity?.department || '—';
+  const scopes = [
+    ...(identity?.roleScopes || []).map((scope) => `角色:${scope}`),
+    ...(identity?.departmentScopes || []).map((scope) => `部门:${scope}`),
+  ];
+  document.getElementById('playgroundScopes').textContent = scopes.join('、') || '—';
+  document.getElementById('playgroundCapabilities').textContent =
+    (identity?.capabilities || []).join('、') || '—';
+}
+
+function resetPlaygroundDiagnostics() {
+  ['playgroundStrategy', 'playgroundIntent', 'playgroundIntentSource', 'playgroundConfidence',
+    'playgroundSkillVersion', 'playgroundGrounded', 'playgroundWebSearchStatus',
+    'playgroundTrace', 'playgroundToolSummary']
+    .forEach((id) => { document.getElementById(id).textContent = '—'; });
+  document.getElementById('playgroundSkill').textContent = '未命中';
+  document.getElementById('playgroundSources').replaceChildren(document.createTextNode('—'));
+}
+
+function resetPlaygroundLocal() {
+  playgroundConversationId = createPlaygroundConversationId();
+  document.getElementById('playgroundSessionId').textContent = playgroundConversationId;
+  document.getElementById('playgroundQuery').value = '';
+  const empty = document.createElement('div');
+  empty.className = 'playground-empty';
+  empty.id = 'playgroundEmpty';
+  empty.textContent = '输入测试问题，结果和执行详情会在当前工作区显示。';
+  document.getElementById('playgroundMessages').replaceChildren(empty);
+  document.getElementById('playgroundRunStatus').textContent = '就绪';
+  document.getElementById('playgroundRunStatus').className = 'playground-run-status';
+  document.getElementById('playgroundNotice').textContent = '';
+  resetPlaygroundDiagnostics();
+}
+
+async function resetPlaygroundSession() {
+  const previousConversation = playgroundConversationId;
+  const previousActor = playgroundActorUserId;
+  resetPlaygroundLocal();
+  if (!previousActor || !previousConversation) return;
+  try {
+    await api('/admin/playground/reset', { method: 'POST', body: JSON.stringify({
+      actorUserId: previousActor, conversationId: previousConversation,
+    }) });
+  } catch (error) {
+    document.getElementById('playgroundNotice').textContent = `旧会话清理失败：${error.message}`;
+  }
+}
+
+function appendPlaygroundMessage(role, copy, blocked = false, note = '') {
+  document.getElementById('playgroundEmpty')?.remove();
+  const item = document.createElement('article');
+  item.className = `playground-message ${role}${blocked ? ' blocked' : ''}`;
+  const label = document.createElement('div');
+  label.className = 'playground-message-role';
+  label.textContent = role === 'user' ? '问题' : 'Agent';
+  const content = document.createElement('div');
+  const body = document.createElement('p');
+  body.className = 'playground-message-copy';
+  body.textContent = copy || '未返回内容';
+  content.appendChild(body);
+  if (note) {
+    const detail = document.createElement('div');
+    detail.className = 'playground-message-note';
+    detail.textContent = note;
+    content.appendChild(detail);
+  }
+  item.append(label, content);
+  const messages = document.getElementById('playgroundMessages');
+  messages.appendChild(item);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function renderPlaygroundSources(retrieval) {
+  const container = document.getElementById('playgroundSources');
+  container.replaceChildren();
+  const hits = retrieval?.hits || [];
+  if (!hits.length) {
+    container.appendChild(document.createTextNode('—'));
+    return;
+  }
+  hits.slice(0, 5).forEach((hit, index) => {
+    const source = hit.metadata?.source || hit.titlePath || hit.documentId || hit.id || `命中 ${index + 1}`;
+    const row = document.createElement('div');
+    row.className = 'playground-source';
+    const score = Number.isFinite(Number(hit.score)) ? ` · ${Number(hit.score).toFixed(3)}` : '';
+    row.textContent = `${source}${score}`;
+    container.appendChild(row);
   });
-  if (tab.dataset.tab === 'tokens') loadTokens().catch(showError);
-  if (tab.dataset.tab === 'knowledge') loadKnowledgeCatalog().catch(showError);
-  if (tab.dataset.tab === 'badCases') Promise.all([loadBadCases(), loadBadCaseMetrics()]).catch(showError);
-  if (tab.dataset.tab === 'audit') loadAudit().catch(showError);
+}
+
+function renderPlaygroundDiagnostics(result) {
+  document.getElementById('playgroundStrategy').textContent = text(result.planStrategy);
+  document.getElementById('playgroundIntent').textContent = text(result.intent);
+  document.getElementById('playgroundIntentSource').textContent = text(result.intentSource);
+  document.getElementById('playgroundConfidence').textContent =
+    Number.isFinite(Number(result.intentConfidence)) ? `${(Number(result.intentConfidence) * 100).toFixed(1)}%` : '—';
+  document.getElementById('playgroundSkill').textContent = result.skill?.name || '未命中';
+  const skillVersion = result.skill?.versionId
+    ? `#${result.skill.versionId}${result.skill.packageDigest ? ` · ${result.skill.packageDigest.slice(0, 12)}` : ''}`
+    : '—';
+  document.getElementById('playgroundSkillVersion').textContent = skillVersion;
+  document.getElementById('playgroundGrounded').textContent = result.grounded ? '是' : '否';
+  document.getElementById('playgroundWebSearchStatus').textContent =
+    result.webSearchEnabled ? '已启用' : '未启用';
+  const trace = document.getElementById('playgroundTrace');
+  trace.textContent = text(result.traceId);
+  trace.title = result.traceId || '';
+  document.getElementById('playgroundToolSummary').textContent = text(result.toolSummary);
+  renderPlaygroundSources(result.retrieval);
+}
+
+function setPlaygroundBusy(busy) {
+  playgroundBusy = busy;
+  document.getElementById('runPlayground').disabled = busy;
+  document.getElementById('resetPlayground').disabled = busy;
+  document.getElementById('playgroundIdentity').disabled = busy;
+  document.getElementById('playgroundTopK').disabled = busy;
+  document.getElementById('playgroundWebSearch').disabled = busy;
+  const status = document.getElementById('playgroundRunStatus');
+  if (busy) {
+    status.textContent = document.getElementById('playgroundWebSearch').checked
+      ? '联网搜索中' : '运行中';
+    status.className = 'playground-run-status busy';
+  }
+}
+
+async function runPlayground(query) {
+  if (playgroundBusy || !playgroundActorUserId) return;
+  const runActorUserId = playgroundActorUserId;
+  const runConversationId = playgroundConversationId;
+  appendPlaygroundMessage('user', query);
+  document.getElementById('playgroundQuery').value = '';
+  document.getElementById('playgroundNotice').textContent = '';
+  setPlaygroundBusy(true);
+  try {
+    const result = await api('/admin/playground/ask', { method: 'POST', body: JSON.stringify({
+      actorUserId: runActorUserId,
+      conversationId: runConversationId,
+      query,
+      topK: Number(document.getElementById('playgroundTopK').value) || 5,
+      webSearchEnabled: document.getElementById('playgroundWebSearch').checked,
+    }) });
+    if (runActorUserId !== playgroundActorUserId
+        || runConversationId !== playgroundConversationId) return;
+    const blockedNote = result.sensitiveOperationBlocked
+      ? `敏感操作已拦截${result.operationLabel ? `：${result.operationLabel}` : ''}` : '';
+    appendPlaygroundMessage('assistant', result.answer, result.sensitiveOperationBlocked, blockedNote);
+    renderPlaygroundDiagnostics(result);
+    const status = document.getElementById('playgroundRunStatus');
+    status.textContent = result.sensitiveOperationBlocked ? '已拦截' : '完成';
+    status.className = `playground-run-status${result.sensitiveOperationBlocked ? ' blocked' : ''}`;
+  } catch (error) {
+    if (runActorUserId !== playgroundActorUserId
+        || runConversationId !== playgroundConversationId) return;
+    appendPlaygroundMessage('assistant', `运行失败：${error.message}`, true);
+    const status = document.getElementById('playgroundRunStatus');
+    status.textContent = '失败';
+    status.className = 'playground-run-status blocked';
+  } finally {
+    setPlaygroundBusy(false);
+  }
+}
+
+function selectAdminTab(name) {
+  document.querySelectorAll('.tab').forEach((item) =>
+    item.classList.toggle('active', item.dataset.tab === name));
+  ['users', 'tokens', 'knowledge', 'playground', 'badCases', 'audit'].forEach((panelName) => {
+    document.getElementById(`${panelName}Panel`).classList.toggle('hidden', name !== panelName);
+  });
+  if (name === 'tokens') loadTokens().catch(showError);
+  if (name === 'knowledge') loadKnowledgeCatalog().catch(showError);
+  if (name === 'badCases') Promise.all([loadBadCases(), loadBadCaseMetrics()]).catch(showError);
+  if (name === 'audit') loadAudit().catch(showError);
+}
+
+document.querySelectorAll('.tab').forEach((tab) => tab.addEventListener('click', () => {
+  selectAdminTab(tab.dataset.tab);
 }));
 
 document.getElementById('openCreateUser').addEventListener('click', () => document.getElementById('createUserForm').classList.remove('hidden'));
@@ -654,6 +847,27 @@ document.getElementById('confirmKnowledgeImport').addEventListener('click', () =
 document.getElementById('knowledgeOverlapToggle').addEventListener('change', (event) => {
   document.getElementById('knowledgeChunkList').classList.toggle('knowledge-overlap-hidden', !event.target.checked);
 });
+document.getElementById('playgroundForm').addEventListener('submit', (event) => {
+  event.preventDefault();
+  const query = document.getElementById('playgroundQuery').value.trim();
+  if (query) runPlayground(query);
+});
+document.getElementById('resetPlayground').addEventListener('click', () => resetPlaygroundSession());
+document.getElementById('playgroundIdentity').addEventListener('change', async (event) => {
+  const previousActor = playgroundActorUserId;
+  const previousConversation = playgroundConversationId;
+  playgroundActorUserId = event.target.value || undefined;
+  renderPlaygroundIdentity();
+  resetPlaygroundLocal();
+  if (!previousActor || !previousConversation) return;
+  try {
+    await api('/admin/playground/reset', { method: 'POST', body: JSON.stringify({
+      actorUserId: previousActor, conversationId: previousConversation,
+    }) });
+  } catch (error) {
+    document.getElementById('playgroundNotice').textContent = `旧会话清理失败：${error.message}`;
+  }
+});
 document.getElementById('refreshAudit').addEventListener('click', () => loadAudit().catch(showError));
 document.getElementById('refreshBadCases').addEventListener('click', () => Promise.all([
   loadBadCases(), loadBadCaseMetrics(),
@@ -662,6 +876,15 @@ document.getElementById('badCaseFilters').addEventListener('submit', (event) => 
   event.preventDefault(); loadBadCases().catch(showError);
 });
 document.getElementById('closeBadCase').addEventListener('click', () => document.getElementById('badCaseDialog').close());
+document.getElementById('replayBadCase').addEventListener('click', async () => {
+  const query = selectedBadCase?.query || '';
+  document.getElementById('badCaseDialog').close();
+  selectAdminTab('playground');
+  await resetPlaygroundSession();
+  const input = document.getElementById('playgroundQuery');
+  input.value = query;
+  input.focus();
+});
 document.getElementById('copyTrace').addEventListener('click', async () => {
   if (selectedBadCase?.traceId) await navigator.clipboard.writeText(selectedBadCase.traceId);
   document.getElementById('badCaseDialogNotice').textContent = 'Trace ID 已复制';

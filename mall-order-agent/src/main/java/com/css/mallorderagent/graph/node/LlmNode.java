@@ -77,12 +77,14 @@ public class LlmNode implements NodeAction {
             BuiltPrompt built = state.value(AgentGraphKeys.BUILT_PROMPT, BuiltPrompt.class)
                     .orElseThrow(() -> new IllegalStateException("builtPrompt is required before LlmNode"));
             int contextChunks = state.value(AgentGraphKeys.CONTEXT_HIT_COUNT, 0);
+            boolean webSearchEnabled = state.value(AgentGraphKeys.WEB_SEARCH_ENABLED, false);
             RagTraceScope trace = RagTracingAdvisor.parentScope();
             String streamId = state.value(AgentGraphKeys.STREAM_ID, "");
             answer = streamId.isBlank()
-                    ? callLlm(trace, query, built, contextChunks)
-                    : streamLlm(trace, query, built, contextChunks, streamId);
-            log.info("LlmNode completed, strategy={}, answerLength={}", planStrategy, answer.length());
+                    ? callLlm(trace, query, built, contextChunks, webSearchEnabled)
+                    : streamLlm(trace, query, built, contextChunks, streamId, webSearchEnabled);
+            log.info("LlmNode completed, strategy={}, webSearch={}, answerLength={}",
+                    planStrategy, webSearchEnabled, answer.length());
         }
 
         Map<String, Object> updates = new HashMap<>();
@@ -99,7 +101,8 @@ public class LlmNode implements NodeAction {
         return updates;
     }
 
-    private String callLlm(RagTraceScope trace, String query, BuiltPrompt built, int contextChunks) {
+    private String callLlm(RagTraceScope trace, String query, BuiltPrompt built,
+                           int contextChunks, boolean webSearchEnabled) {
         Map<String, Object> startAttributes = LlmSpanAttributes.buildStartAttributes(
                 query.length(),
                 contextChunks,
@@ -109,7 +112,9 @@ public class LlmNode implements NodeAction {
 
         try (RagTraceScope llmSpan = trace.child(RagTraceService.LLM_OPERATION, startAttributes)) {
             try {
-                ChatClient.ChatClientRequestSpec requestSpec = requestSpec(built, false);
+                llmSpan.attribute("webSearchEnabled", webSearchEnabled);
+                ChatClient.ChatClientRequestSpec requestSpec = requestSpec(
+                        built, false, webSearchEnabled);
                 ChatResponse response = requestSpec.call().chatResponse();
                 llmSpan.attributes(LlmSpanAttributes.fromChatResponse(response));
                 llmSpan.attribute("streaming", false);
@@ -122,7 +127,7 @@ public class LlmNode implements NodeAction {
     }
 
     private String streamLlm(RagTraceScope trace, String query, BuiltPrompt built,
-                             int contextChunks, String streamId) {
+                             int contextChunks, String streamId, boolean webSearchEnabled) {
         Map<String, Object> startAttributes = LlmSpanAttributes.buildStartAttributes(
                 query.length(),
                 contextChunks,
@@ -137,7 +142,8 @@ public class LlmNode implements NodeAction {
             AtomicReference<ChatResponse> lastResponse = new AtomicReference<>();
             StringBuilder answer = new StringBuilder();
             try {
-                requestSpec(built, true).stream().chatResponse()
+                llmSpan.attribute("webSearchEnabled", webSearchEnabled);
+                requestSpec(built, true, webSearchEnabled).stream().chatResponse()
                         .takeUntilOther(streamRegistry.cancellationSignal(streamId))
                         .doOnNext(response -> {
                             lastResponse.set(response);
@@ -176,12 +182,16 @@ public class LlmNode implements NodeAction {
         }
     }
 
-    private ChatClient.ChatClientRequestSpec requestSpec(BuiltPrompt built, boolean streaming) {
+    private ChatClient.ChatClientRequestSpec requestSpec(BuiltPrompt built, boolean streaming,
+                                                         boolean webSearchEnabled) {
         OpenAiChatOptions.Builder options = OpenAiChatOptions.builder()
                 .model(askProperties.getModel())
                 .temperature(askProperties.getTemperature());
         if (streaming) {
             options.streamUsage(true);
+        }
+        if (webSearchEnabled) {
+            options.extraBody(Map.of("enable_search", true));
         }
         return chatClient.prompt()
                 .options(options.build())

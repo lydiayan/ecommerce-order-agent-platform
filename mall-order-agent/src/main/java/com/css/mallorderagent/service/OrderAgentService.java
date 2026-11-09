@@ -14,6 +14,7 @@ import com.css.mallorderagent.dto.HumanFeedbackRequest;
 import com.css.mallorderagent.dto.OrderAgentResponse;
 import com.css.mallorderagent.graph.AgentGraphKeys;
 import com.css.mallorderagent.graph.AgentGraphSupport;
+import com.css.mallorderagent.memory.ConversationTurn;
 import com.css.mallorderagent.planner.HumanApprovalDetector;
 import com.css.mallorderagent.planner.HumanApprovalDetector.ConfirmationIntent;
 import com.css.mallorderagent.planner.PlanResult;
@@ -30,6 +31,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -83,7 +85,44 @@ public class OrderAgentService {
      */
     public OrderAgentResponse ask(AskRequest request, String actorUserId,
                                   boolean sensitiveConfirmationAllowed) {
-        return ask(request, actorUserId, sensitiveConfirmationAllowed, null);
+        return ask(request, actorUserId,
+                ExecutionOptions.regular(sensitiveConfirmationAllowed), null);
+    }
+
+    /**
+     * 以管理员调试模式执行问答。调用方提供的历史仅存在于管理端进程内，Graph 不会
+     * 读取或写入用户的 Redis、Milvus 或画像记忆；敏感操作只允许进入审核拦截点。
+     *
+     * @param request 调试问题和会话编号
+     * @param actorUserId 用于能力和知识范围校验的业务身份
+     * @param history 当前调试会话的临时历史
+     * @param adminUserId 管理员主键，用于隔离 Graph checkpoint 命名空间
+     * @param webSearchEnabled 是否允许本轮调用模型服务的联网搜索能力
+     * @return 带内部诊断字段的 Agent 响应
+     */
+    public OrderAgentResponse askForPlayground(AskRequest request, String actorUserId,
+                                                List<ConversationTurn> history, long adminUserId,
+                                                boolean webSearchEnabled) {
+        if (adminUserId <= 0) {
+            throw new IllegalArgumentException("adminUserId must be positive");
+        }
+        return ask(request, actorUserId,
+                ExecutionOptions.playground(history, adminUserId, webSearchEnabled), null);
+    }
+
+    /**
+     * 清除管理员调试会话可能留下的敏感操作等待状态。页面会同时换用新的会话编号，
+     * 因此旧的 Graph checkpoint 不会再次被调用。
+     */
+    public void clearPlaygroundSession(String actorUserId, String conversationId, long adminUserId) {
+        if (adminUserId <= 0) {
+            throw new IllegalArgumentException("adminUserId must be positive");
+        }
+        AskRequest request = new AskRequest();
+        request.setConversationId(conversationId);
+        String sessionId = resolveSessionId(request);
+        pendingConfirmationService.clear(threadId(
+                "admin-playground:" + adminUserId, requireActorUserId(actorUserId), sessionId));
     }
 
     /**
@@ -101,36 +140,41 @@ public class OrderAgentService {
         if (streamId == null || streamId.isBlank()) {
             throw new IllegalArgumentException("streamId must not be blank");
         }
-        return ask(request, actorUserId, sensitiveConfirmationAllowed, streamId);
+        return ask(request, actorUserId,
+                ExecutionOptions.regular(sensitiveConfirmationAllowed), streamId);
     }
 
     private OrderAgentResponse ask(AskRequest request, String actorUserId,
-                                   boolean sensitiveConfirmationAllowed, String streamId) {
+                                   ExecutionOptions options, String streamId) {
         validateAsk(request);
         String userId = requireActorUserId(actorUserId);
         sanitizeUntrustedRequest(request);
         String sessionId = resolveSessionId(request);
-        String threadId = threadId(userId, sessionId);
+        String threadId = threadId(options.threadNamespace(), userId, sessionId);
 
         if (pendingConfirmationService.isAwaiting(threadId)) {
             ConfirmationIntent intent = HumanApprovalDetector.parseUserConfirmationIntent(request.getQuery());
-            if (!sensitiveConfirmationAllowed && intent != ConfirmationIntent.UNKNOWN) {
+            if (!options.sensitiveConfirmationAllowed() && intent != ConfirmationIntent.UNKNOWN) {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                         "当前身份不能确认或取消敏感业务操作");
             }
-            return handlePendingConfirmationReply(request, userId, sessionId, threadId, streamId);
+            return handlePendingConfirmationReply(
+                    request, userId, sessionId, threadId, streamId, options);
         }
 
         if (!ragTraceService.isEnabled()) {
-            return askInternal(request, userId, sessionId, threadId, RagTraceScope.noop(), streamId);
+            return askInternal(request, userId, sessionId, threadId,
+                    RagTraceScope.noop(), streamId, options);
         }
 
         Map<String, Object> attrs = baseTraceAttributes(sessionId, userId);
+        attrs.put("executionSource", options.executionSource());
         attrs.put("queryLength", request.getQuery().trim().length());
         attrs.put("queryFingerprint", TracePrivacy.fingerprint(request.getQuery().trim()));
         attrs.put("streaming", streamId != null);
         try (RagTraceScope trace = ragTraceService.begin("agent.ask", attrs)) {
-            OrderAgentResponse response = askInternal(request, userId, sessionId, threadId, trace, streamId);
+            OrderAgentResponse response = askInternal(
+                    request, userId, sessionId, threadId, trace, streamId, options);
             response.setTraceId(trace.traceId());
             if (response.getRetrieval() != null) {
                 response.getRetrieval().setTraceId(trace.traceId());
@@ -227,8 +271,10 @@ public class OrderAgentService {
     }
 
     private OrderAgentResponse askInternal(AskRequest request, String userId, String sessionId,
-                                           String threadId, RagTraceScope trace, String streamId) {
-        Map<String, Object> inputs = buildGraphInputs(request, userId, sessionId, streamId);
+                                           String threadId, RagTraceScope trace, String streamId,
+                                           ExecutionOptions options) {
+        Map<String, Object> inputs = buildGraphInputs(
+                request, userId, sessionId, streamId, options);
 
         RunnableConfig config = RunnableConfig.builder().threadId(threadId).build();
         RagTracingAdvisor.bindParentScope(trace);
@@ -240,7 +286,8 @@ public class OrderAgentService {
                 log.info("Graph interrupted before human review, threadId={}, answerLength={}",
                         threadId, response.getAnswer() != null ? response.getAnswer().length() : 0);
                 finalizeAwaitingConfirmation(
-                        response, userId, sessionId, threadId, request.getQuery().trim(), trace.traceId());
+                        response, userId, sessionId, threadId, request.getQuery().trim(),
+                        trace.traceId(), options.memoryEnabled());
             } else {
                 pendingConfirmationService.clear(threadId);
             }
@@ -259,12 +306,16 @@ public class OrderAgentService {
     }
 
     private Map<String, Object> buildGraphInputs(AskRequest request, String userId, String sessionId,
-                                                  String streamId) {
+                                                  String streamId, ExecutionOptions options) {
         Map<String, Object> inputs = new HashMap<>();
         inputs.put(AgentGraphKeys.ASK_REQUEST, request);
         inputs.put(AgentGraphKeys.QUERY, request.getQuery().trim());
         inputs.put(AgentGraphKeys.USER_ID, userId);
         inputs.put(AgentGraphKeys.SESSION_ID, sessionId);
+        inputs.put(AgentGraphKeys.HISTORY, options.history());
+        inputs.put(AgentGraphKeys.HISTORY_COUNT, options.history().size());
+        inputs.put(AgentGraphKeys.MEMORY_ENABLED, options.memoryEnabled());
+        inputs.put(AgentGraphKeys.WEB_SEARCH_ENABLED, options.webSearchEnabled());
         inputs.put(AgentGraphKeys.HUMAN_REVIEW_ENABLED, orderAgentProperties.getGraph().isHumanReviewEnabled());
         DemoActorContext actor = demoPersonaService.resolveActor(userId);
         inputs.put(AgentGraphKeys.PERSONA_CONTEXT, actor.personaPrompt());
@@ -301,6 +352,9 @@ public class OrderAgentService {
         response.setClarificationRequired(state.value(AgentGraphKeys.CLARIFICATION_REQUIRED, false));
         response.setRetrieval(retrieval);
         response.setToolSummary(state.value(AgentGraphKeys.TOOL_RESULT, ""));
+        response.setSelectedSkillName(plan != null ? plan.skillName() : null);
+        response.setSelectedSkillVersionId(plan != null ? plan.skillVersionId() : null);
+        response.setSelectedSkillDigest(plan != null ? plan.skillDigest() : null);
         response.setInterrupted(interrupted);
         response.setThreadId(threadId);
         response.setApprovalReason(state.value(AgentGraphKeys.APPROVAL_REASON, ""));
@@ -320,7 +374,7 @@ public class OrderAgentService {
 
     private OrderAgentResponse handlePendingConfirmationReply(AskRequest request, String userId,
                                                                String sessionId, String threadId,
-                                                               String streamId) {
+                                                               String streamId, ExecutionOptions options) {
         ConfirmationIntent intent = HumanApprovalDetector.parseUserConfirmationIntent(request.getQuery());
         if (intent == ConfirmationIntent.CONFIRM) {
             HumanFeedbackRequest resumeRequest = new HumanFeedbackRequest();
@@ -337,7 +391,8 @@ public class OrderAgentService {
 
         pendingConfirmationService.clear(threadId);
         log.info("Pending confirmation abandoned, sessionId={}, newQuery='{}'", sessionId, request.getQuery());
-        return askInternal(request, userId, sessionId, threadId, RagTraceScope.noop(), streamId);
+        return askInternal(request, userId, sessionId, threadId,
+                RagTraceScope.noop(), streamId, options);
     }
 
     private void finalizeAwaitingConfirmation(OrderAgentResponse response,
@@ -345,14 +400,15 @@ public class OrderAgentService {
                                               String sessionId,
                                               String threadId,
                                               String userQuery,
-                                              String traceId) {
+                                              String traceId,
+                                              boolean memoryEnabled) {
         if (!response.isInterrupted()
                 || !HumanApprovalDetector.isDangerousOrderOp(response.getPlanStrategy())) {
             return;
         }
         response.setAwaitingUserConfirm(true);
         pendingConfirmationService.markAwaiting(threadId, userId, traceId);
-        if (response.getAnswer() != null && !response.getAnswer().isBlank()) {
+        if (memoryEnabled && response.getAnswer() != null && !response.getAnswer().isBlank()) {
             hybridMemoryManager.addExchange(userId, sessionId, userQuery, response.getAnswer());
         }
     }
@@ -416,8 +472,9 @@ public class OrderAgentService {
         request.setTopK(Math.min(Math.max(request.getTopK(), 1), 10));
     }
 
-    private static String threadId(String userId, String sessionId) {
-        return userId + "::" + sessionId;
+    private static String threadId(String namespace, String userId, String sessionId) {
+        String prefix = namespace == null || namespace.isBlank() ? "" : namespace + "::";
+        return prefix + userId + "::" + sessionId;
     }
 
     private static Map<String, Object> baseTraceAttributes(String conversationId, String userId) {
@@ -431,5 +488,29 @@ public class OrderAgentService {
     }
 
     private record GraphRunResult(NodeOutput output, OverAllState state, boolean interrupted) {
+    }
+
+    private record ExecutionOptions(boolean sensitiveConfirmationAllowed,
+                                    boolean memoryEnabled,
+                                    boolean webSearchEnabled,
+                                    List<ConversationTurn> history,
+                                    String executionSource,
+                                    String threadNamespace) {
+
+        private ExecutionOptions {
+            history = history != null ? List.copyOf(history) : List.of();
+        }
+
+        private static ExecutionOptions regular(boolean sensitiveConfirmationAllowed) {
+            return new ExecutionOptions(
+                    sensitiveConfirmationAllowed, true, false, List.of(), "BUSINESS", "");
+        }
+
+        private static ExecutionOptions playground(List<ConversationTurn> history, long adminUserId,
+                                                   boolean webSearchEnabled) {
+            return new ExecutionOptions(
+                    false, false, webSearchEnabled, history,
+                    "ADMIN_PLAYGROUND", "admin-playground:" + adminUserId);
+        }
     }
 }

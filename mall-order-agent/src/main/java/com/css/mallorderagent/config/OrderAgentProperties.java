@@ -3,6 +3,9 @@ package com.css.mallorderagent.config;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.NestedConfigurationProperty;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * 订单 Agent 配置。
  */
@@ -23,6 +26,9 @@ public class OrderAgentProperties {
 
     @NestedConfigurationProperty
     private IntentProperties intent = new IntentProperties();
+
+    @NestedConfigurationProperty
+    private SkillProperties skill = new SkillProperties();
 
     public ConversationProperties getConversation() {
         return conversation;
@@ -62,6 +68,55 @@ public class OrderAgentProperties {
 
     public void setIntent(IntentProperties intent) {
         this.intent = intent != null ? intent : new IntentProperties();
+    }
+
+    public SkillProperties getSkill() {
+        return skill;
+    }
+
+    public void setSkill(SkillProperties skill) {
+        this.skill = skill != null ? skill : new SkillProperties();
+    }
+
+    public static class SkillProperties {
+
+        private boolean enabled = true;
+        private String storageDirectory = "data/skills";
+        private List<String> allowedHosts = new ArrayList<>(List.of(
+                "github.com", "codeload.github.com", "gitlab.com"));
+        private boolean allowPrivateHosts;
+        private int connectTimeoutMillis = 5_000;
+        private int readTimeoutMillis = 15_000;
+        private int maxRedirects = 3;
+        private long maxArchiveBytes = 10 * 1024 * 1024L;
+        private long maxPackageBytes = 2 * 1024 * 1024L;
+        private long maxFileBytes = 512 * 1024L;
+        private int maxFiles = 200;
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public String getStorageDirectory() { return storageDirectory; }
+        public void setStorageDirectory(String storageDirectory) { this.storageDirectory = storageDirectory; }
+        public List<String> getAllowedHosts() { return allowedHosts; }
+        public void setAllowedHosts(List<String> allowedHosts) {
+            this.allowedHosts = allowedHosts != null ? new ArrayList<>(allowedHosts) : new ArrayList<>();
+        }
+        public boolean isAllowPrivateHosts() { return allowPrivateHosts; }
+        public void setAllowPrivateHosts(boolean allowPrivateHosts) { this.allowPrivateHosts = allowPrivateHosts; }
+        public int getConnectTimeoutMillis() { return Math.max(100, connectTimeoutMillis); }
+        public void setConnectTimeoutMillis(int connectTimeoutMillis) { this.connectTimeoutMillis = connectTimeoutMillis; }
+        public int getReadTimeoutMillis() { return Math.max(100, readTimeoutMillis); }
+        public void setReadTimeoutMillis(int readTimeoutMillis) { this.readTimeoutMillis = readTimeoutMillis; }
+        public int getMaxRedirects() { return Math.max(0, Math.min(maxRedirects, 10)); }
+        public void setMaxRedirects(int maxRedirects) { this.maxRedirects = maxRedirects; }
+        public long getMaxArchiveBytes() { return Math.max(1, maxArchiveBytes); }
+        public void setMaxArchiveBytes(long maxArchiveBytes) { this.maxArchiveBytes = maxArchiveBytes; }
+        public long getMaxPackageBytes() { return Math.max(1, maxPackageBytes); }
+        public void setMaxPackageBytes(long maxPackageBytes) { this.maxPackageBytes = maxPackageBytes; }
+        public long getMaxFileBytes() { return Math.max(1, maxFileBytes); }
+        public void setMaxFileBytes(long maxFileBytes) { this.maxFileBytes = maxFileBytes; }
+        public int getMaxFiles() { return Math.max(1, maxFiles); }
+        public void setMaxFiles(int maxFiles) { this.maxFiles = maxFiles; }
     }
 
     public static class IntentProperties {

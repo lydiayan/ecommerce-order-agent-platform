@@ -14,6 +14,7 @@ import com.example.mallorderobservability.model.TraceEventType;
 import com.example.mallorderobservability.trace.RagTraceScope;
 import com.example.mallorderobservability.trace.RagTraceService;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
@@ -21,6 +22,8 @@ import org.springframework.ai.chat.metadata.ChatResponseMetadata;
 import org.springframework.ai.chat.metadata.DefaultUsage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.chat.prompt.ChatOptions;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -154,5 +157,34 @@ class LlmNodeTest {
         assertTrue(((Number) llmEnd.getAttributes().get("ttftMs")).longValue() >= 0);
         assertEquals(llmEnd.getAttributes().get("ttftMs"),
                 llmEnd.getAttributes().get("firstTokenLatencyMs"));
+    }
+
+    @Test
+    void enablesProviderWebSearchOnlyWhenGraphRequestsIt() {
+        ChatClient chatClient = mock(ChatClient.class);
+        AgentStreamSessionRegistry streamRegistry = mock(AgentStreamSessionRegistry.class);
+        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
+        ChatClient.CallResponseSpec responseSpec = mock(ChatClient.CallResponseSpec.class);
+        when(chatClient.prompt()).thenReturn(requestSpec);
+        when(requestSpec.options(any())).thenReturn(requestSpec);
+        when(requestSpec.system(anyString())).thenReturn(requestSpec);
+        when(requestSpec.user(anyString())).thenReturn(requestSpec);
+        when(requestSpec.call()).thenReturn(responseSpec);
+        when(responseSpec.chatResponse()).thenReturn(new ChatResponse(List.of(
+                new Generation(new AssistantMessage("带来源的联网回答")))));
+
+        LlmNode node = new LlmNode(chatClient, new RagDocumentProperties(), streamRegistry);
+        OverAllState state = new OverAllState(Map.of(
+                AgentGraphKeys.QUERY, "今天有什么新消息",
+                AgentGraphKeys.PLAN, new PlanResult("GENERAL_CHAT", List.of()),
+                AgentGraphKeys.BUILT_PROMPT, new BuiltPrompt("system", "user"),
+                AgentGraphKeys.WEB_SEARCH_ENABLED, true));
+
+        node.apply(state);
+
+        ArgumentCaptor<ChatOptions> options = ArgumentCaptor.forClass(ChatOptions.class);
+        verify(requestSpec).options(options.capture());
+        OpenAiChatOptions actual = (OpenAiChatOptions) options.getValue();
+        assertEquals(true, actual.getExtraBody().get("enable_search"));
     }
 }

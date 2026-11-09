@@ -27,6 +27,11 @@ public class OrderAgentResponse {
     /** Internal diagnostic snapshot; never returned to end users. */
     private String toolSummary;
 
+    /** Internal skill diagnostics; exposed only by the administrator playground. */
+    private String selectedSkillName;
+    private Long selectedSkillVersionId;
+    private String selectedSkillDigest;
+
     /** Graph 是否在 human 节点前中断，等待人工审核 */
     private boolean interrupted;
 
@@ -172,6 +177,33 @@ public class OrderAgentResponse {
 
     public void setToolSummary(String toolSummary) {
         this.toolSummary = toolSummary;
+    }
+
+    @JsonIgnore
+    public String getSelectedSkillName() {
+        return selectedSkillName;
+    }
+
+    public void setSelectedSkillName(String selectedSkillName) {
+        this.selectedSkillName = selectedSkillName;
+    }
+
+    @JsonIgnore
+    public Long getSelectedSkillVersionId() {
+        return selectedSkillVersionId;
+    }
+
+    public void setSelectedSkillVersionId(Long selectedSkillVersionId) {
+        this.selectedSkillVersionId = selectedSkillVersionId;
+    }
+
+    @JsonIgnore
+    public String getSelectedSkillDigest() {
+        return selectedSkillDigest;
+    }
+
+    public void setSelectedSkillDigest(String selectedSkillDigest) {
+        this.selectedSkillDigest = selectedSkillDigest;
     }
 
     public boolean isInterrupted() {

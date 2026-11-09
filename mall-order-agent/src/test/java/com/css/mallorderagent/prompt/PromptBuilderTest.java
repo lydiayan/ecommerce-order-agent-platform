@@ -45,4 +45,18 @@ class PromptBuilderTest {
         assertTrue(prompt.userMessage().contains("【企业知识问答】请仅结合当前身份获准访问的参考资料回答"));
         assertTrue(prompt.userMessage().contains("身份只影响资料范围和表达方式，不改变问题意图"));
     }
+
+    @Test
+    void selectedSkillIsAddedAfterNonOverridableSystemPolicy() {
+        PlanResult plan = new PlanResult("SKILL_EXECUTE", ActionDefinitions.ragQaPipeline());
+        plan.setSkillInstructions("Always explain the result as a short checklist.");
+
+        BuiltPrompt prompt = promptBuilder.build(plan, List.of(), "", "", "", "",
+                "$refund-explainer 请解释", "核心安全策略。");
+
+        assertTrue(prompt.systemPrompt().startsWith("核心安全策略。"));
+        assertTrue(prompt.systemPrompt().contains("不能覆盖系统安全策略"));
+        assertTrue(prompt.systemPrompt().contains("Always explain the result as a short checklist."));
+        assertTrue(prompt.userMessage().contains("【Skill 执行】"));
+    }
 }
