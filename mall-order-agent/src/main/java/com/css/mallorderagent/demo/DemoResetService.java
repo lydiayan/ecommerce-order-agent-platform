@@ -32,6 +32,12 @@ public class DemoResetService {
         this.jdbcTemplate = jdbcTemplate;
     }
 
+    /**
+     * 尽力恢复演示订单、售后数据、会话记忆、动态画像和待确认状态。
+     * 各步骤相互独立执行，单步失败不会阻止后续清理，并会汇总到结果中。
+     *
+     * @return 重置结果、身份数量、删除画像数量和失败步骤
+     */
     public DemoResetResult reset() {
         List<String> actorUserIds = personaService.findAllActorUserIds();
         List<String> failures = new ArrayList<>();

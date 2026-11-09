@@ -29,6 +29,10 @@ class PlannerNodeTest {
     @Test
     void emitsPlannerSpanWithPlanDetails() {
         PlanResult plan = new PlanResult("RAG_QA", ActionDefinitions.ragQaPipeline());
+        plan.setIntent("RAG_QA");
+        plan.setIntentSource("RULE");
+        plan.setIntentConfidence(0.95D);
+        plan.setRuleMatchStatus("MATCH");
         PlannerNode node = new PlannerNode(query -> plan);
         List<TraceEvent> events = new ArrayList<>();
         RagTraceService traceService = traceService(events);
@@ -59,6 +63,10 @@ class PlannerNodeTest {
         assertEquals(List.of("MEMORY_LOAD", "KNOWLEDGE_SEARCH", "LLM_GENERATE"),
                 plannerEnd.getAttributes().get("actions"));
         assertEquals(false, plannerEnd.getAttributes().get("humanApprovalRequired"));
+        assertEquals("RAG_QA", plannerEnd.getAttributes().get("intent"));
+        assertEquals("RULE", plannerEnd.getAttributes().get("intentSource"));
+        assertEquals(0.95D, plannerEnd.getAttributes().get("intentConfidence"));
+        assertEquals("MATCH", plannerEnd.getAttributes().get("ruleMatchStatus"));
     }
 
     @Test
@@ -114,6 +122,38 @@ class PlannerNodeTest {
     }
 
     @Test
+    void skillPlanCannotBypassOrderCapabilityChecks() {
+        PlanResult skillPlan = new PlanResult("SKILL_EXECUTE", ActionDefinitions.orderQueryPipeline());
+        skillPlan.setSkillName("order-explainer");
+        PlannerNode node = new PlannerNode(query -> skillPlan);
+
+        Map<String, Object> result = node.apply(new OverAllState(Map.of(
+                AgentGraphKeys.QUERY, "$order-explainer 查询订单",
+                AgentGraphKeys.CAPABILITIES, List.of("KNOWLEDGE_SEARCH"))));
+
+        assertEquals("CAPABILITY_DENIED", result.get(AgentGraphKeys.PLAN_STRATEGY));
+        assertEquals("当前演示身份没有订单查询能力。请切换到销售或客户身份后重试。",
+                result.get(AgentGraphKeys.ANSWER));
+    }
+
+    @Test
+    void publishesSelectedSkillMetadataIntoGraphState() {
+        PlanResult skillPlan = new PlanResult("SKILL_EXECUTE", ActionDefinitions.ragQaPipeline());
+        skillPlan.setSkillName("refund-explainer");
+        skillPlan.setSkillVersionId(12L);
+        skillPlan.setSkillDigest("c".repeat(64));
+        skillPlan.setSkillInstructions("Explain carefully.");
+        PlannerNode node = new PlannerNode(query -> skillPlan);
+
+        Map<String, Object> result = node.apply(new OverAllState(Map.of(
+                AgentGraphKeys.QUERY, "$refund-explainer explain")));
+
+        assertEquals("refund-explainer", result.get(AgentGraphKeys.SELECTED_SKILL_NAME));
+        assertEquals(12L, result.get(AgentGraphKeys.SELECTED_SKILL_VERSION_ID));
+        assertEquals("Explain carefully.", result.get(AgentGraphKeys.SKILL_INSTRUCTIONS));
+    }
+
+    @Test
     void clearsPreviousTurnOutputsBeforeExecutingNewPlan() {
         PlannerNode node = new PlannerNode(query ->
                 new PlanResult("ORDER_POLICY_QUERY", ActionDefinitions.orderPolicyQueryPipeline()));
@@ -138,6 +178,26 @@ class PlannerNodeTest {
         assertEquals(false, result.get(AgentGraphKeys.GROUNDED));
         assertEquals(Map.of(), result.get(AgentGraphKeys.HUMAN_FEEDBACK));
         assertEquals("", result.get(AgentGraphKeys.NEXT_NODE));
+    }
+
+    @Test
+    void lowConfidencePlanReturnsClarificationWithoutActions() {
+        PlanResult plan = new PlanResult("CLARIFY_INTENT", List.of());
+        plan.setIntent("UNKNOWN");
+        plan.setIntentSource("LLM");
+        plan.setIntentConfidence(0.45D);
+        plan.setRuleMatchStatus("NO_MATCH");
+        plan.setClarificationRequired(true);
+        plan.setClarificationMessage("请明确说明您的需求。");
+        PlannerNode node = new PlannerNode(query -> plan);
+
+        Map<String, Object> result = node.apply(new OverAllState(Map.of(
+                AgentGraphKeys.QUERY, "这个怎么办")));
+
+        assertEquals("请明确说明您的需求。", result.get(AgentGraphKeys.ANSWER));
+        assertEquals(true, result.get(AgentGraphKeys.CLARIFICATION_REQUIRED));
+        assertEquals("LLM", result.get(AgentGraphKeys.INTENT_SOURCE));
+        assertEquals(0.45D, result.get(AgentGraphKeys.INTENT_CONFIDENCE));
     }
 
     private static RagTraceService traceService(List<TraceEvent> events) {

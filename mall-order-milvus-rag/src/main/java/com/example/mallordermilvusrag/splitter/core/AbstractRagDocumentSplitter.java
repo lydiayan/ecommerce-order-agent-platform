@@ -34,10 +34,14 @@ public abstract class AbstractRagDocumentSplitter {
         this.tokenCounter = tokenCounter;
     }
 
+    /** @return 当前实现对应的切分策略 */
     public abstract RagSplitStrategy strategy();
 
     /**
-     * 执行完整切分流水线并返回不可变结果。
+     * 执行完整切分流水线：校验请求、生成稳定编号、解析父子关系并补齐公共元数据。
+     *
+     * @param request 已选择策略的切分请求
+     * @return 不可变标准分块列表
      */
     public final List<RagChunk> split(RagSplitRequest request) {
         if (request == null || request.text() == null || request.text().isBlank()) {
@@ -93,6 +97,12 @@ public abstract class AbstractRagDocumentSplitter {
         return List.copyOf(chunks);
     }
 
+    /**
+     * 执行标准切分并转换为 Spring AI 文档。
+     *
+     * @param request 切分请求
+     * @return Spring AI 文档列表
+     */
     public final List<Document> apply(RagSplitRequest request) {
         return split(request).stream().map(RagChunk::toDocument).toList();
     }

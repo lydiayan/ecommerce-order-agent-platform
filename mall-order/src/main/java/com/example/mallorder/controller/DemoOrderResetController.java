@@ -17,6 +17,11 @@ public class DemoOrderResetController {
         this.resetService = resetService;
     }
 
+    /**
+     * 在 demo profile 下将订单和售后数据恢复为预置演示状态。
+     *
+     * @return 各类订单演示数据的重置数量和结果
+     */
     @PostMapping("/reset")
     public DemoOrderResetService.DemoOrderResetResult reset() {
         return resetService.reset();

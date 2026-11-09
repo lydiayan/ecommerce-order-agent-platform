@@ -49,11 +49,18 @@ public class MemoryNode implements NodeAction, ActionExecutor {
         this.embeddingModel = embeddingModel;
     }
 
+    /**
+     * 在独立 Trace Span 中加载短期历史、长期记忆和用户画像。
+     *
+     * @param state 包含用户、会话和问题的 Graph 状态
+     * @return 历史对话、长期记忆、画像及对应计数
+     */
     @Override
     public Map<String, Object> apply(OverAllState state) {
         String query = AgentGraphSupport.resolveQuery(state);
         String userId = AgentGraphSupport.resolveUserId(state, hybridMemoryManager.getDefaultUserId());
         String sessionId = AgentGraphSupport.resolveSessionId(state);
+        boolean memoryEnabled = state.value(AgentGraphKeys.MEMORY_ENABLED, true);
 
         Map<String, Object> startAttributes = new LinkedHashMap<>();
         startAttributes.put("conversationId", sessionId);
@@ -63,6 +70,24 @@ public class MemoryNode implements NodeAction, ActionExecutor {
         RagTraceScope trace = RagTracingAdvisor.parentScope();
         try (RagTraceScope memorySpan = trace.child(NODE_NAME, startAttributes)) {
             try {
+                if (!memoryEnabled) {
+                    List<ConversationTurn> history = AgentGraphSupport.readHistory(state);
+                    memorySpan.attribute("historyCount", history.size());
+                    memorySpan.attribute("longTermMemoryCount", 0);
+                    memorySpan.attribute("longTermMemoryRetrievalSucceeded", false);
+                    memorySpan.attribute("profileLoaded", false);
+                    memorySpan.attribute("memoryCount", 0);
+                    memorySpan.attribute("memoryEnabled", false);
+                    return Map.of(
+                            AgentGraphKeys.USER_ID, userId,
+                            AgentGraphKeys.SESSION_ID, sessionId,
+                            AgentGraphKeys.QUERY, query,
+                            AgentGraphKeys.HISTORY, history,
+                            AgentGraphKeys.HISTORY_COUNT, history.size(),
+                            AgentGraphKeys.USER_PROFILE_CONTEXT, "",
+                            AgentGraphKeys.LONG_TERM_MEMORY, "",
+                            AgentGraphKeys.MEMORY_COUNT, 0);
+                }
                 List<ConversationTurn> history = loadHistory(userId, sessionId);
                 String userProfileContext = loadUserProfileContext(userId);
                 LongTermMemory longTermMemory = loadLongTermMemory(userId, query);
@@ -74,6 +99,7 @@ public class MemoryNode implements NodeAction, ActionExecutor {
                 memorySpan.attribute("longTermMemoryRetrievalSucceeded", longTermMemory.retrievalSucceeded());
                 memorySpan.attribute("profileLoaded", profileLoaded);
                 memorySpan.attribute("memoryCount", memoryCount);
+                memorySpan.attribute("memoryEnabled", true);
 
                 log.info("MemoryNode completed, history={}, longTerm={}, profile={}",
                         history.size(), longTermMemory.count(), profileLoaded);
@@ -95,6 +121,12 @@ public class MemoryNode implements NodeAction, ActionExecutor {
         }
     }
 
+    /**
+     * 执行实际的混合记忆读取，供 Graph 节点和动态动作调度复用。
+     *
+     * @param state 包含用户、会话和问题的 Graph 状态
+     * @return 可直接合并进 Graph 的记忆状态增量
+     */
     @Override
     public Map<String, Object> execute(OverAllState state) {
         return apply(state);

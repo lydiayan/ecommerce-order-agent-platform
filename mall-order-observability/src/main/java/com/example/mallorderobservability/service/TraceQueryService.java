@@ -18,6 +18,13 @@ public class TraceQueryService {
         this.repository = repository;
     }
 
+    /**
+     * 从 Elasticsearch 读取指定 Trace 的完整事件序列。
+     *
+     * @param traceId Trace 编号
+     * @return 按时间排序的事件
+     * @throws IOException Elasticsearch 查询失败时抛出
+     */
     public List<Map<String, Object>> getTrace(String traceId) throws IOException {
         return repository.findByTraceId(traceId);
     }

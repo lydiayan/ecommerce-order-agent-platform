@@ -20,6 +20,12 @@ public class UserProfileService {
         this.userProfileRepository = userProfileRepository;
     }
 
+    /**
+     * 按用户编号读取动态画像，空编号不会访问数据库。
+     *
+     * @param userId 用户编号
+     * @return 用户画像；参数为空或记录不存在时为空
+     */
     public Optional<UserProfile> findByUserId(String userId) {
         if (userId == null || userId.isBlank()) {
             return Optional.empty();
@@ -27,12 +33,24 @@ public class UserProfileService {
         return userProfileRepository.findByUserId(userId.trim());
     }
 
+    /**
+     * 读取用户画像并格式化为可注入模型提示词的上下文。
+     *
+     * @param userId 用户编号
+     * @return 画像提示词；无画像时返回空字符串
+     */
     public String formatForPrompt(String userId) {
         return findByUserId(userId)
                 .map(this::formatProfile)
                 .orElse("");
     }
 
+    /**
+     * 将结构化画像格式化为包含版本和可信度的提示词片段。
+     *
+     * @param profile 用户画像
+     * @return 提示词片段；画像为空时返回空字符串
+     */
     public String formatProfile(UserProfile profile) {
         if (profile == null) {
             return "";

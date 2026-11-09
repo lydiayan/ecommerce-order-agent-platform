@@ -30,6 +30,15 @@ public class ImpersonationService {
         this.identities = identities;
     }
 
+    /**
+     * 以指定演示身份替换当前认证，并在会话中保留管理员身份和过期时间。
+     * 此功能仅在 {@code demo} profile 下启用，模拟会话固定持续 15 分钟。
+     *
+     * @param admin 发起模拟的管理员主体
+     * @param actorUserId 要模拟的业务身份编号
+     * @param reason 模拟原因，写入会话供审计使用
+     * @param session 当前 HTTP 会话
+     */
     public void start(SecurityUserPrincipal admin, String actorUserId, String reason, HttpSession session) {
         DemoPersonaView identity = identities.requirePersona(actorUserId);
         String role = identity.category().name();
@@ -46,11 +55,23 @@ public class ImpersonationService {
         replaceAuthentication(session, assumed);
     }
 
+    /**
+     * 判断认证主体是否带有身份模拟标记。
+     *
+     * @param principal 当前认证主体
+     * @return 正在模拟身份时返回 {@code true}
+     */
     public static boolean isImpersonating(SecurityUserPrincipal principal) {
         return principal != null && principal.getAuthorities().stream()
                 .anyMatch(authority -> "IMPERSONATED".equals(authority.getAuthority()));
     }
 
+    /**
+     * 恢复会话中保存的原管理员认证，并清除身份模拟上下文。
+     *
+     * @param session 当前 HTTP 会话
+     * @return 成功恢复时返回 {@code true}；没有原主体时返回 {@code false}
+     */
     public static boolean restore(HttpSession session) {
         if (session == null || !(session.getAttribute(ORIGINAL_PRINCIPAL) instanceof SecurityUserPrincipal original)) {
             return false;

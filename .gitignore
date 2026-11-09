@@ -16,6 +16,7 @@ target/
 logs/
 run/
 *.log
+data/skills/
 
 # Generated files
 mall-order-milvus-rag/src/main/resources/data/generated/

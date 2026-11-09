@@ -22,12 +22,26 @@ public class ActionExecutorRegistry {
         this.applicationContext = applicationContext;
     }
 
+    /**
+     * 按 Bean 名称解析动作执行器并执行当前 Graph 状态。
+     *
+     * @param executorBeanName Planner 动作定义中的 Spring Bean 名称
+     * @param state 当前 Graph 状态
+     * @return 执行器产生的状态增量
+     */
     public Map<String, Object> execute(String executorBeanName, OverAllState state) {
         ActionExecutor executor = resolve(executorBeanName);
         log.debug("Executing action via bean '{}'", executorBeanName);
         return executor.execute(state);
     }
 
+    /**
+     * 从 Spring 容器解析并校验动作执行器类型。
+     *
+     * @param executorBeanName Spring Bean 名称
+     * @return 实现 ActionExecutor 的 Bean
+     * @throws IllegalStateException Bean 未实现 ActionExecutor 时抛出
+     */
     public ActionExecutor resolve(String executorBeanName) {
         Object bean = applicationContext.getBean(executorBeanName);
         if (!(bean instanceof ActionExecutor executor)) {

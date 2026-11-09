@@ -19,6 +19,12 @@ public class WorkspaceController {
         this.identityService = identityService;
     }
 
+    /**
+     * 获取当前业务身份对应的工作台信息，包括角色、能力和可访问客户范围。
+     *
+     * @param principal 当前登录身份，用于确定实际业务身份
+     * @return 当前身份的演示工作台数据
+     */
     @GetMapping("/me")
     public ApiResponse<DemoWorkspace> current(
             @AuthenticationPrincipal SecurityUserPrincipal principal) {

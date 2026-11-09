@@ -4,8 +4,11 @@ const accounts = [
   ['sales.wanglei', '王磊', '华东区销售'], ['sales.liuting', '刘婷', '大客户销售'],
   ['customer.zhangwei', '张伟', '个人客户'], ['customer.lina', '李娜', '个人客户'],
 ];
+const demoUsernames = new Set(accounts.map(([username]) => username));
+const demoPassword = 'DemoLogin@2026!';
 
 let csrf;
+let autoFilledDemoPassword = false;
 async function loadCsrf() {
   const response = await fetch('/auth/csrf');
   const body = await response.json();
@@ -25,11 +28,26 @@ function renderAccounts() {
     button.append(title, detail);
     button.addEventListener('click', () => {
       document.getElementById('username').value = username;
-      document.getElementById('password').focus();
+      document.getElementById('password').value = demoPassword;
+      autoFilledDemoPassword = true;
+      document.getElementById('loginButton').focus();
     });
     container.appendChild(button);
   });
 }
+
+document.getElementById('username').addEventListener('input', (event) => {
+  const password = document.getElementById('password');
+  if (autoFilledDemoPassword && !demoUsernames.has(event.target.value.trim())
+      && password.value === demoPassword) {
+    password.value = '';
+    autoFilledDemoPassword = false;
+  }
+});
+
+document.getElementById('password').addEventListener('input', () => {
+  autoFilledDemoPassword = false;
+});
 
 document.getElementById('loginForm').addEventListener('submit', async (event) => {
   event.preventDefault();

@@ -1,0 +1,461 @@
+package com.css.mallorderagent.feedback;
+
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Repository;
+
+import java.sql.Timestamp;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Optional;
+
+@Repository
+public class AgentFeedbackRepository {
+
+    private final JdbcTemplate jdbcTemplate;
+
+    public AgentFeedbackRepository(JdbcTemplate jdbcTemplate) {
+        this.jdbcTemplate = jdbcTemplate;
+    }
+
+    /** @param row 待保存的加密回答快照及其归属、分类和过期信息 */
+    public void insertResponse(ResponseSnapshotInsert row) {
+        jdbcTemplate.update("""
+                INSERT INTO agent_response_snapshot(
+                    response_id, app_user_id, actor_user_fingerprint, trace_id, plan_strategy,
+                    intent, intent_source, intent_confidence, rule_match_status, clarification_required,
+                    model_name, agent_version, grounded, interrupted, query_ciphertext,
+                    answer_ciphertext, conversation_ciphertext, tool_summary_ciphertext,
+                    operation_ciphertext, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, row.responseId(), row.appUserId(), row.actorUserFingerprint(), row.traceId(),
+                row.planStrategy(), row.intent(), row.intentSource(), row.intentConfidence(),
+                row.ruleMatchStatus(), row.clarificationRequired(), row.modelName(), row.agentVersion(),
+                row.grounded(), row.interrupted(),
+                row.queryCiphertext(), row.answerCiphertext(), row.conversationCiphertext(),
+                row.toolSummaryCiphertext(), row.operationCiphertext(), Timestamp.valueOf(row.expiresAt()));
+    }
+
+    /**
+     * @param responseId Agent 回复编号
+     * @param appUserId 登录账户主键
+     * @return 回复属于该账户且尚未过期时返回 true
+     */
+    public boolean responseOwnedBy(String responseId, long appUserId) {
+        Integer count = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM agent_response_snapshot
+                WHERE response_id = ? AND app_user_id = ? AND expires_at > CURRENT_TIMESTAMP
+                """, Integer.class, responseId, appUserId);
+        return count != null && count > 0;
+    }
+
+    /**
+     * @param responseId Agent 回复编号
+     * @return 关联 Trace ID；不存在时返回 null
+     */
+    public String findTraceId(String responseId) {
+        return jdbcTemplate.query("SELECT trace_id FROM agent_response_snapshot WHERE response_id = ?",
+                (rs, rowNum) -> rs.getString("trace_id"), responseId).stream().findFirst().orElse(null);
+    }
+
+    /**
+     * @param responseId Agent 回复编号
+     * @return 回复快照中的意图分类元数据
+     */
+    public Optional<IntentMetadata> findIntentMetadata(String responseId) {
+        return jdbcTemplate.query("""
+                SELECT intent, intent_source, intent_confidence, rule_match_status,
+                       clarification_required
+                FROM agent_response_snapshot WHERE response_id = ?
+                """, (rs, rowNum) -> new IntentMetadata(
+                rs.getString("intent"), rs.getString("intent_source"),
+                rs.getObject("intent_confidence", Double.class),
+                rs.getString("rule_match_status"), rs.getBoolean("clarification_required")),
+                responseId).stream().findFirst();
+    }
+
+    /**
+     * @param responseId Agent 回复编号
+     * @param appUserId 登录账户主键
+     * @return 当前账户提交的反馈记录
+     */
+    public Optional<FeedbackRow> findFeedback(String responseId, long appUserId) {
+        return jdbcTemplate.query("""
+                SELECT id, version, rating, reasons_json, comment_ciphertext, updated_at
+                FROM agent_response_feedback WHERE response_id = ? AND app_user_id = ?
+                """, (rs, rowNum) -> new FeedbackRow(
+                rs.getLong("id"), rs.getLong("version"), rs.getString("rating"), rs.getString("reasons_json"),
+                rs.getString("comment_ciphertext"), toLocalDateTime(rs.getTimestamp("updated_at"))),
+                responseId, appUserId).stream().findFirst();
+    }
+
+    /**
+     * 新建或覆盖回复反馈，并递增反馈版本。
+     *
+     * @param responseId Agent 回复编号
+     * @param appUserId 登录账户主键
+     * @param rating UP 或 DOWN
+     * @param reasonsJson 反馈原因 JSON
+     * @param commentCiphertext 加密后的补充评论
+     * @return 保存后的反馈记录
+     */
+    public FeedbackRow upsertFeedback(String responseId, long appUserId, String rating,
+                                      String reasonsJson, String commentCiphertext) {
+        jdbcTemplate.update("""
+                INSERT INTO agent_response_feedback(
+                    response_id, app_user_id, version, rating, reasons_json, comment_ciphertext)
+                VALUES (?, ?, 1, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE
+                    rating = VALUES(rating), reasons_json = VALUES(reasons_json),
+                    comment_ciphertext = VALUES(comment_ciphertext), version = version + 1,
+                    updated_at = CURRENT_TIMESTAMP
+                """, responseId, appUserId, rating, reasonsJson, commentCiphertext);
+        return findFeedback(responseId, appUserId)
+                .orElseThrow(() -> new IllegalStateException("Feedback upsert returned no row"));
+    }
+
+    /**
+     * @param responseId Agent 回复编号
+     * @param appUserId 登录账户主键
+     * @return 找到并删除反馈时返回 true
+     */
+    public boolean deleteFeedback(String responseId, long appUserId) {
+        return jdbcTemplate.update("""
+                DELETE FROM agent_response_feedback WHERE response_id = ? AND app_user_id = ?
+                """, responseId, appUserId) > 0;
+    }
+
+    /**
+     * 追加不可变的反馈创建、更新或撤销历史。
+     *
+     * @param responseId Agent 回复编号
+     * @param appUserId 操作账户主键
+     * @param action 反馈变更动作
+     * @param previousRating 变更前评价
+     * @param currentRating 变更后评价
+     * @param reasonsJson 变更时的原因 JSON
+     */
+    public void insertFeedbackHistory(String responseId, long appUserId, String action,
+                                      String previousRating, String currentRating, String reasonsJson) {
+        jdbcTemplate.update("""
+                INSERT INTO agent_feedback_history(
+                    response_id, app_user_id, action, previous_rating, current_rating, reasons_json)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """, responseId, appUserId, action, previousRating, currentRating, reasonsJson);
+    }
+
+    /**
+     * @param responseId Agent 回复编号
+     * @return 关联坏案例的主键、版本和状态
+     */
+    public Optional<BadCaseIdentity> findBadCaseIdentity(String responseId) {
+        return jdbcTemplate.query("""
+                SELECT id, version, status FROM agent_bad_case WHERE response_id = ?
+                """, (rs, rowNum) -> new BadCaseIdentity(
+                rs.getLong("id"), rs.getLong("version"), rs.getString("status")), responseId).stream().findFirst();
+    }
+
+    /**
+     * 为差评回复创建或重新打开坏案例，并在必要时提升优先级。
+     *
+     * @param responseId Agent 回复编号
+     * @param priority NORMAL 或 URGENT
+     * @return 创建或更新后的坏案例标识
+     */
+    public BadCaseIdentity openBadCase(String responseId, String priority) {
+        jdbcTemplate.update("""
+                INSERT INTO agent_bad_case(response_id, version, status, priority, last_feedback_at)
+                VALUES (?, 1, 'NEW', ?, CURRENT_TIMESTAMP)
+                ON DUPLICATE KEY UPDATE
+                    status = IF(status = 'IGNORED', 'NEW', status),
+                    priority = IF(? = 'URGENT', 'URGENT', priority),
+                    version = version + 1,
+                    last_feedback_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                """, responseId, priority, priority);
+        return findBadCaseIdentity(responseId)
+                .orElseThrow(() -> new IllegalStateException("Bad case upsert returned no row"));
+    }
+
+    /**
+     * 仅将仍为 NEW 的坏案例转为 IGNORED。
+     *
+     * @param responseId Agent 回复编号
+     * @return 成功更新后的坏案例标识
+     */
+    public Optional<BadCaseIdentity> ignoreNewBadCase(String responseId) {
+        Optional<BadCaseIdentity> current = findBadCaseIdentity(responseId);
+        if (current.isEmpty() || !BadCaseStatus.NEW.name().equals(current.get().status())) {
+            return Optional.empty();
+        }
+        int changed = jdbcTemplate.update("""
+                UPDATE agent_bad_case SET status = 'IGNORED', version = version + 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE response_id = ? AND status = 'NEW'
+                """, responseId);
+        return changed > 0 ? findBadCaseIdentity(responseId) : Optional.empty();
+    }
+
+    /**
+     * @param badCaseId 坏案例主键
+     * @param changedByUserId 操作账户主键
+     * @param fromStatus 原状态
+     * @param toStatus 目标状态
+     * @param detailsCiphertext 加密后的变更说明
+     */
+    public void insertBadCaseHistory(long badCaseId, Long changedByUserId,
+                                     String fromStatus, String toStatus, String detailsCiphertext) {
+        jdbcTemplate.update("""
+                INSERT INTO agent_bad_case_history(
+                    bad_case_id, changed_by_user_id, from_status, to_status, details_ciphertext)
+                VALUES (?, ?, ?, ?, ?)
+                """, badCaseId, changedByUserId, fromStatus, toStatus, detailsCiphertext);
+    }
+
+    /**
+     * 按状态、原因、策略、版本和时间范围查询坏案例摘要。
+     *
+     * @param status 可选坏案例状态
+     * @param reason 可选反馈原因
+     * @param strategy 可选 Planner 策略
+     * @param modelName 可选模型名称
+     * @param agentVersion 可选 Agent 版本
+     * @param from 创建时间下界（含）
+     * @param toExclusive 创建时间上界（不含）
+     * @param limit 最大返回条数
+     * @return 坏案例摘要列表
+     */
+    public List<BadCaseListRow> findBadCases(String status, String reason, String strategy,
+                                             String modelName, String agentVersion,
+                                             LocalDateTime from, LocalDateTime toExclusive, int limit) {
+        String reasonPattern = reason != null ? "%\"" + reason + "\"%" : null;
+        Timestamp fromTimestamp = from != null ? Timestamp.valueOf(from) : null;
+        Timestamp toTimestamp = toExclusive != null ? Timestamp.valueOf(toExclusive) : null;
+        return jdbcTemplate.query("""
+                SELECT bc.id, bc.response_id, bc.status, bc.priority, bc.category,
+                       bc.owner_username, bc.fix_version, bc.created_at, bc.updated_at,
+                       r.trace_id, r.plan_strategy, r.model_name, r.agent_version,
+                       f.reasons_json
+                FROM agent_bad_case bc
+                JOIN agent_response_snapshot r ON r.response_id = bc.response_id
+                LEFT JOIN agent_response_feedback f ON f.response_id = bc.response_id
+                WHERE (? IS NULL OR bc.status = ?)
+                  AND (? IS NULL OR f.reasons_json LIKE ?)
+                  AND (? IS NULL OR r.plan_strategy = ?)
+                  AND (? IS NULL OR r.model_name = ?)
+                  AND (? IS NULL OR r.agent_version = ?)
+                  AND (? IS NULL OR r.created_at >= ?)
+                  AND (? IS NULL OR r.created_at < ?)
+                ORDER BY CASE WHEN bc.priority = 'URGENT' THEN 0 ELSE 1 END, bc.updated_at DESC
+                LIMIT ?
+                """, (rs, rowNum) -> new BadCaseListRow(
+                rs.getLong("id"), rs.getString("response_id"), rs.getString("status"),
+                rs.getString("priority"), rs.getString("category"), rs.getString("owner_username"),
+                rs.getString("fix_version"), rs.getString("trace_id"), rs.getString("plan_strategy"),
+                rs.getString("model_name"), rs.getString("agent_version"), rs.getString("reasons_json"),
+                toLocalDateTime(rs.getTimestamp("created_at")),
+                toLocalDateTime(rs.getTimestamp("updated_at"))),
+                status, status, reason, reasonPattern, strategy, strategy,
+                modelName, modelName, agentVersion, agentVersion,
+                fromTimestamp, fromTimestamp, toTimestamp, toTimestamp, limit);
+    }
+
+    /**
+     * @param badCaseId 坏案例主键
+     * @return 坏案例、回答快照和反馈的完整持久化记录
+     */
+    public Optional<BadCaseDetailRow> findBadCase(long badCaseId) {
+        return jdbcTemplate.query("""
+                SELECT bc.id, bc.response_id, bc.status, bc.priority, bc.category,
+                       bc.owner_username, bc.root_cause_ciphertext, bc.resolution_ciphertext,
+                       bc.fix_version, bc.created_at, bc.updated_at,
+                       r.trace_id, r.plan_strategy, r.model_name, r.agent_version,
+                       r.grounded, r.interrupted, r.query_ciphertext, r.answer_ciphertext,
+                       r.conversation_ciphertext, r.tool_summary_ciphertext, r.operation_ciphertext,
+                       f.reasons_json, f.comment_ciphertext
+                FROM agent_bad_case bc
+                JOIN agent_response_snapshot r ON r.response_id = bc.response_id
+                LEFT JOIN agent_response_feedback f ON f.response_id = bc.response_id
+                WHERE bc.id = ?
+                """, (rs, rowNum) -> new BadCaseDetailRow(
+                rs.getLong("id"), rs.getString("response_id"), rs.getString("status"),
+                rs.getString("priority"), rs.getString("category"), rs.getString("owner_username"),
+                rs.getString("root_cause_ciphertext"), rs.getString("resolution_ciphertext"),
+                rs.getString("fix_version"), rs.getString("trace_id"), rs.getString("plan_strategy"),
+                rs.getString("model_name"), rs.getString("agent_version"), rs.getBoolean("grounded"),
+                rs.getBoolean("interrupted"), rs.getString("query_ciphertext"),
+                rs.getString("answer_ciphertext"), rs.getString("conversation_ciphertext"),
+                rs.getString("tool_summary_ciphertext"), rs.getString("operation_ciphertext"),
+                rs.getString("reasons_json"),
+                rs.getString("comment_ciphertext"), toLocalDateTime(rs.getTimestamp("created_at")),
+                toLocalDateTime(rs.getTimestamp("updated_at"))), badCaseId).stream().findFirst();
+    }
+
+    /**
+     * 更新坏案例处理字段并递增聚合版本。
+     *
+     * @param badCaseId 坏案例主键
+     * @param status 目标状态
+     * @param category 问题分类
+     * @param ownerUsername 负责人用户名
+     * @param rootCauseCiphertext 加密后的根因
+     * @param resolutionCiphertext 加密后的处理结论
+     * @param fixVersion 修复版本
+     */
+    public void updateBadCase(long badCaseId, String status, String category, String ownerUsername,
+                              String rootCauseCiphertext, String resolutionCiphertext, String fixVersion) {
+        jdbcTemplate.update("""
+                UPDATE agent_bad_case
+                SET status = ?, category = ?, owner_username = ?, root_cause_ciphertext = ?,
+                    resolution_ciphertext = ?, fix_version = ?, version = version + 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """, status, category, ownerUsername, rootCauseCiphertext,
+                resolutionCiphertext, fixVersion, badCaseId);
+    }
+
+    /**
+     * @param days 向前统计天数
+     * @return 回复、反馈和坏案例聚合计数
+     */
+    public MetricsRow metrics(int days) {
+        return jdbcTemplate.queryForObject("""
+                SELECT COUNT(DISTINCT r.response_id) AS response_count,
+                       COUNT(f.id) AS feedback_count,
+                       COALESCE(SUM(CASE WHEN f.rating = 'UP' THEN 1 ELSE 0 END), 0) AS up_count,
+                       COALESCE(SUM(CASE WHEN f.rating = 'DOWN' THEN 1 ELSE 0 END), 0) AS down_count,
+                       COALESCE(SUM(CASE WHEN bc.status NOT IN ('IGNORED', 'NEW') THEN 1 ELSE 0 END), 0)
+                           AS triaged_count,
+                       COALESCE(SUM(CASE WHEN bc.status = 'RESOLVED' THEN 1 ELSE 0 END), 0)
+                           AS resolved_count
+                FROM agent_response_snapshot r
+                LEFT JOIN agent_response_feedback f ON f.response_id = r.response_id
+                LEFT JOIN agent_bad_case bc ON bc.response_id = r.response_id
+                WHERE r.created_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL ? DAY)
+                """, (rs, rowNum) -> new MetricsRow(
+                rs.getLong("response_count"), rs.getLong("feedback_count"), rs.getLong("up_count"),
+                rs.getLong("down_count"), rs.getLong("triaged_count"), rs.getLong("resolved_count")), days);
+    }
+
+    /** 按日期、策略和模型幂等汇总历史反馈指标。 */
+    public void rollupDailyMetrics() {
+        jdbcTemplate.update("""
+                INSERT INTO agent_feedback_daily_metric(
+                    metric_date, plan_strategy, model_name, response_count,
+                    feedback_count, up_count, down_count)
+                SELECT DATE(r.created_at), r.plan_strategy, r.model_name, COUNT(DISTINCT r.response_id),
+                       COUNT(f.id),
+                       COALESCE(SUM(CASE WHEN f.rating = 'UP' THEN 1 ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN f.rating = 'DOWN' THEN 1 ELSE 0 END), 0)
+                FROM agent_response_snapshot r
+                LEFT JOIN agent_response_feedback f ON f.response_id = r.response_id
+                WHERE r.created_at < CURRENT_DATE
+                GROUP BY DATE(r.created_at), r.plan_strategy, r.model_name
+                ON DUPLICATE KEY UPDATE
+                    response_count = VALUES(response_count), feedback_count = VALUES(feedback_count),
+                    up_count = VALUES(up_count), down_count = VALUES(down_count)
+                """);
+    }
+
+    /** @return 本批删除的过期回答快照数量，单批最多 1000 条 */
+    public int purgeExpiredResponses() {
+        return jdbcTemplate.update("""
+                DELETE FROM agent_response_snapshot
+                WHERE expires_at < CURRENT_TIMESTAMP
+                LIMIT 1000
+                """);
+    }
+
+    /**
+     * @param responseId Agent 回复编号
+     * @return 未过期回复及其反馈、坏案例的评测快照
+     */
+    public Optional<EvaluationSnapshotRow> findEvaluationSnapshot(String responseId) {
+        return jdbcTemplate.query("""
+                SELECT r.response_id, r.trace_id, r.plan_strategy, r.intent, r.intent_source,
+                       r.intent_confidence, r.rule_match_status, r.clarification_required,
+                       r.model_name, r.agent_version,
+                       r.grounded, r.interrupted, r.query_ciphertext, r.answer_ciphertext,
+                       r.conversation_ciphertext, r.tool_summary_ciphertext, r.operation_ciphertext,
+                       f.rating, f.reasons_json, f.comment_ciphertext,
+                       bc.id AS bad_case_id, bc.status AS bad_case_status, bc.priority AS bad_case_priority
+                FROM agent_response_snapshot r
+                LEFT JOIN agent_response_feedback f ON f.response_id = r.response_id
+                LEFT JOIN agent_bad_case bc ON bc.response_id = r.response_id
+                WHERE r.response_id = ? AND r.expires_at > CURRENT_TIMESTAMP
+                """, (rs, rowNum) -> new EvaluationSnapshotRow(
+                rs.getString("response_id"), rs.getString("trace_id"), rs.getString("plan_strategy"),
+                rs.getString("intent"), rs.getString("intent_source"),
+                rs.getObject("intent_confidence", Double.class), rs.getString("rule_match_status"),
+                rs.getBoolean("clarification_required"), rs.getString("model_name"),
+                rs.getString("agent_version"), rs.getBoolean("grounded"),
+                rs.getBoolean("interrupted"), rs.getString("query_ciphertext"),
+                rs.getString("answer_ciphertext"), rs.getString("conversation_ciphertext"),
+                rs.getString("tool_summary_ciphertext"), rs.getString("operation_ciphertext"),
+                rs.getString("rating"), rs.getString("reasons_json"), rs.getString("comment_ciphertext"),
+                (Long) rs.getObject("bad_case_id"), rs.getString("bad_case_status"),
+                rs.getString("bad_case_priority")), responseId).stream().findFirst();
+    }
+
+    private static LocalDateTime toLocalDateTime(Timestamp value) {
+        return value != null ? value.toLocalDateTime() : null;
+    }
+
+    public record ResponseSnapshotInsert(
+            String responseId, long appUserId, String actorUserFingerprint, String traceId,
+            String planStrategy, String intent, String intentSource, Double intentConfidence,
+            String ruleMatchStatus, boolean clarificationRequired, String modelName,
+            String agentVersion, boolean grounded, boolean interrupted,
+            String queryCiphertext, String answerCiphertext,
+            String conversationCiphertext, String toolSummaryCiphertext,
+            String operationCiphertext, LocalDateTime expiresAt) {
+    }
+
+    public record IntentMetadata(String intent, String intentSource, Double intentConfidence,
+                                 String ruleMatchStatus, boolean clarificationRequired) {
+    }
+
+    public record FeedbackRow(long id, long version, String rating, String reasonsJson,
+                              String commentCiphertext, LocalDateTime updatedAt) {
+        public FeedbackRow(long id, String rating, String reasonsJson,
+                           String commentCiphertext, LocalDateTime updatedAt) {
+            this(id, 0, rating, reasonsJson, commentCiphertext, updatedAt);
+        }
+    }
+
+    public record BadCaseIdentity(long id, long version, String status) {
+        public BadCaseIdentity(long id, String status) {
+            this(id, 0, status);
+        }
+    }
+
+    public record EvaluationSnapshotRow(
+            String responseId, String traceId, String planStrategy, String intent, String intentSource,
+            Double intentConfidence, String ruleMatchStatus, boolean clarificationRequired,
+            String modelName, String agentVersion,
+            boolean grounded, boolean interrupted, String queryCiphertext, String answerCiphertext,
+            String conversationCiphertext, String toolSummaryCiphertext, String operationCiphertext,
+            String rating, String reasonsJson, String commentCiphertext, Long badCaseId,
+            String badCaseStatus, String badCasePriority) {
+    }
+
+    public record BadCaseListRow(
+            long id, String responseId, String status, String priority, String category,
+            String ownerUsername, String fixVersion, String traceId, String planStrategy,
+            String modelName, String agentVersion, String reasonsJson,
+            LocalDateTime createdAt, LocalDateTime updatedAt) {
+    }
+
+    public record BadCaseDetailRow(
+            long id, String responseId, String status, String priority, String category,
+            String ownerUsername, String rootCauseCiphertext, String resolutionCiphertext,
+            String fixVersion, String traceId, String planStrategy, String modelName,
+            String agentVersion, boolean grounded, boolean interrupted, String queryCiphertext,
+            String answerCiphertext, String conversationCiphertext, String toolSummaryCiphertext,
+            String operationCiphertext, String reasonsJson, String commentCiphertext, LocalDateTime createdAt,
+            LocalDateTime updatedAt) {
+    }
+
+    public record MetricsRow(long responseCount, long feedbackCount, long upCount, long downCount,
+                             long triagedCount, long resolvedCount) {
+    }
+}

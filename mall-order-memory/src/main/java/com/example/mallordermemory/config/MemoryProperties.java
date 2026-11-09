@@ -126,11 +126,23 @@ public class MemoryProperties {
         public static class MilvusProperties {
             private String host = "localhost";
             private int port = 19530;
+            /** 单次 Milvus RPC 的截止时间，避免外部服务不可用时阻塞 Agent 请求。 */
+            private long rpcTimeoutMillis = 10_000L;
+            /** Milvus 请求最大尝试次数；1 表示不做重试。 */
+            private int maxRetryTimes = 1;
+            /** 重试间隔；保留配置项以便故障恢复场景调整。 */
+            private long retryIntervalMillis = 100L;
 
             public String getHost() { return host; }
             public void setHost(String host) { this.host = host; }
             public int getPort() { return port; }
             public void setPort(int port) { this.port = port; }
+            public long getRpcTimeoutMillis() { return Math.max(100L, rpcTimeoutMillis); }
+            public void setRpcTimeoutMillis(long rpcTimeoutMillis) { this.rpcTimeoutMillis = rpcTimeoutMillis; }
+            public int getMaxRetryTimes() { return Math.max(1, maxRetryTimes); }
+            public void setMaxRetryTimes(int maxRetryTimes) { this.maxRetryTimes = maxRetryTimes; }
+            public long getRetryIntervalMillis() { return Math.max(0L, retryIntervalMillis); }
+            public void setRetryIntervalMillis(long retryIntervalMillis) { this.retryIntervalMillis = retryIntervalMillis; }
         }
     }
 

@@ -32,6 +32,12 @@ public class AnswerNode implements NodeAction {
         this.hybridMemoryManager = hybridMemoryManager;
     }
 
+    /**
+     * 固化最终回答状态，并将本轮用户问题和回答写入短期会话记忆。
+     *
+     * @param state 包含问题、回答、用户和会话信息的 Graph 状态
+     * @return 规范化后的回答、grounded、策略、用户和会话状态增量
+     */
     @Override
     public Map<String, Object> apply(OverAllState state) {
         String userId = AgentGraphSupport.resolveUserId(state, hybridMemoryManager.getDefaultUserId());
@@ -40,6 +46,7 @@ public class AnswerNode implements NodeAction {
         String answer = state.value(AgentGraphKeys.ANSWER, "");
         boolean grounded = state.value(AgentGraphKeys.GROUNDED, false);
         String planStrategy = state.value(AgentGraphKeys.PLAN_STRATEGY, "RAG_QA");
+        boolean memoryEnabled = state.value(AgentGraphKeys.MEMORY_ENABLED, true);
 
         Map<String, Object> startAttributes = new LinkedHashMap<>();
         startAttributes.put("conversationId", sessionId);
@@ -50,10 +57,12 @@ public class AnswerNode implements NodeAction {
         RagTraceScope trace = RagTracingAdvisor.parentScope();
         try (RagTraceScope answerSpan = trace.child(NODE_NAME, startAttributes)) {
             try {
-                hybridMemoryManager.addExchange(userId, sessionId, query, answer);
+                if (memoryEnabled) {
+                    hybridMemoryManager.addExchange(userId, sessionId, query, answer);
+                }
                 answerSpan.attribute("answerLength", answer.length());
                 answerSpan.attribute("grounded", grounded);
-                answerSpan.attribute("memoryPersisted", true);
+                answerSpan.attribute("memoryPersisted", memoryEnabled);
 
                 log.info("AnswerNode completed, sessionId={}, grounded={}, strategy={}",
                         sessionId, grounded, planStrategy);

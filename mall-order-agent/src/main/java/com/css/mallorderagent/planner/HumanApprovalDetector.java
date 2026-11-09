@@ -48,7 +48,12 @@ public final class HumanApprovalDetector {
     private HumanApprovalDetector() {
     }
 
-    /** 从用户问题解析敏感操作名称，用于生成确认话术。 */
+    /**
+     * 从用户问题解析规范化的敏感操作名称，用于确认话术和工具路由。
+     *
+     * @param query 用户原始问题
+     * @return 退款、退货、换货、取消订单等操作名称；无法识别时返回“该操作”
+     */
     public static String resolveOperationLabel(String query) {
         if (query == null || query.isBlank()) {
             return "该操作";
@@ -81,7 +86,14 @@ public final class HumanApprovalDetector {
         return "该操作";
     }
 
-    /** 构造敏感订单操作的确认话术（不依赖 LLM，避免复读订单列表）。 */
+    /**
+     * 构造确定性的敏感订单操作确认话术，不依赖 LLM，避免复读完整订单列表。
+     *
+     * @param query 用户原始操作请求，用于识别操作类型
+     * @param toolResult 订单查询工具结果，用于提取订单号和商品名称
+     * @param ragContext 可选规则依据，最多附加 500 个字符
+     * @return 引导用户回复“确认”或“取消”的确认文本
+     */
     public static String buildDangerousOrderConfirmation(String query, String toolResult, String ragContext) {
         String operation = resolveOperationLabel(query);
         String orderId = extractFirstOrderId(toolResult).orElse("上述订单");
@@ -106,7 +118,12 @@ public final class HumanApprovalDetector {
         return sb.toString().trim();
     }
 
-    /** 解析用户对确认话术的回复。 */
+    /**
+     * 解析用户对敏感操作确认话术的回复。
+     *
+     * @param text 用户确认、取消或其他回复
+     * @return CONFIRM、CANCEL 或无法判断时的 UNKNOWN
+     */
     public static ConfirmationIntent parseUserConfirmationIntent(String text) {
         if (text == null || text.isBlank()) {
             return ConfirmationIntent.UNKNOWN;
@@ -121,15 +138,34 @@ public final class HumanApprovalDetector {
         return ConfirmationIntent.UNKNOWN;
     }
 
+    /**
+     * 根据原始操作请求生成取消申请的用户提示。
+     *
+     * @param query 原始敏感操作请求
+     * @return 已取消对应操作申请的提示文本
+     */
     public static String buildCancelMessage(String query) {
         return "好的，已为您取消" + resolveOperationLabel(query) + "申请。";
     }
 
-    /** @deprecated 使用 {@link #buildDangerousOrderConfirmation} */
+    /**
+     * 构造不附带 RAG 规则上下文的兼容确认话术。
+     *
+     * @param query 用户原始操作请求
+     * @param toolResult 订单查询工具结果
+     * @return 敏感操作确认文本
+     * @deprecated 使用 {@link #buildDangerousOrderConfirmation(String, String, String)}
+     */
     public static String buildConfirmationFallback(String query, String toolResult) {
         return buildDangerousOrderConfirmation(query, toolResult, null);
     }
 
+    /**
+     * 判断 Planner 策略是否代表需要人工确认的订单操作链路。
+     *
+     * @param planStrategy Planner 输出的策略名称
+     * @return 策略为 DANGEROUS_ORDER_OP 时返回 true
+     */
     public static boolean isDangerousOrderOp(String planStrategy) {
         return "DANGEROUS_ORDER_OP".equals(planStrategy);
     }
@@ -142,6 +178,12 @@ public final class HumanApprovalDetector {
         return trimmed.substring(0, 500) + "...";
     }
 
+    /**
+     * 从订单工具文本中提取第一个 ORD 开头的订单编号。
+     *
+     * @param toolResult 订单查询工具结果
+     * @return 第一个订单编号；未找到时返回 empty
+     */
     public static Optional<String> extractFirstOrderId(String toolResult) {
         if (toolResult == null || toolResult.isBlank()) {
             return Optional.empty();
@@ -153,6 +195,12 @@ public final class HumanApprovalDetector {
         return Optional.empty();
     }
 
+    /**
+     * 从订单工具的商品明细行中提取第一个商品名称。
+     *
+     * @param toolResult 订单查询工具结果
+     * @return 第一个商品名称；未找到时返回 empty
+     */
     public static Optional<String> extractFirstProductName(String toolResult) {
         if (toolResult == null || toolResult.isBlank()) {
             return Optional.empty();
@@ -183,6 +231,12 @@ public final class HumanApprovalDetector {
         return normalized.contains("取消") || normalized.contains("不要了") || normalized.contains("算了");
     }
 
+    /**
+     * 判断用户问题是否明确请求执行敏感操作，同时排除规则咨询和进度查询。
+     *
+     * @param query 用户原始问题
+     * @return 需要人工确认时返回 true
+     */
     public static boolean queryRequiresApproval(String query) {
         if (query == null || query.isBlank()) {
             return false;
@@ -200,7 +254,12 @@ public final class HumanApprovalDetector {
         return DANGEROUS_QUERY_MARKERS.stream().anyMatch(text::contains);
     }
 
-    /** 退货/退款/换货等场景通常需要附带订单上下文。 */
+    /**
+     * 判断敏感操作确认前是否需要先加载订单上下文。
+     *
+     * @param query 用户原始问题
+     * @return 涉及订单、退货、退款、换货或取消时返回 true
+     */
     public static boolean shouldAttachOrderContext(String query) {
         if (query == null || query.isBlank()) {
             return false;
@@ -212,6 +271,12 @@ public final class HumanApprovalDetector {
         return containsAny(text, "退货", "退款", "换货", "取消订单", "取消");
     }
 
+    /**
+     * 判断助手回答是否包含敏感操作确认话术，作为 Planner 标记之外的防漏检测。
+     *
+     * @param answer 助手生成的回答
+     * @return 回答要求确认敏感操作时返回 true
+     */
     public static boolean answerRequiresApproval(String answer) {
         if (answer == null || answer.isBlank()) {
             return false;
@@ -222,11 +287,26 @@ public final class HumanApprovalDetector {
                 || RISK_CONFIRM.matcher(text).find();
     }
 
+    /**
+     * 综合用户问题和助手回答判断当前问答是否涉及敏感确认。
+     *
+     * @param query 用户原始问题
+     * @param answer 助手生成的回答
+     * @return 任一侧触发敏感操作检测时返回 true
+     */
     public static boolean requiresApproval(String query, String answer) {
         return queryRequiresApproval(query) || answerRequiresApproval(answer);
     }
 
-    /** 结合全局开关与 Planner 标记，判断当前轮次是否进入人工审核。 */
+    /**
+     * 结合全局开关、Planner 标记和文本兜底检测决定是否进入人工审核。
+     *
+     * @param globalEnabled 是否启用 Human-in-the-Loop
+     * @param planRequires Planner 是否已要求人工确认
+     * @param query 用户原始问题
+     * @param answer 助手生成的回答
+     * @return 当前轮次需要人工审核时返回 true
+     */
     public static boolean requiresReview(boolean globalEnabled,
                                          boolean planRequires,
                                          String query,
@@ -237,6 +317,13 @@ public final class HumanApprovalDetector {
         return planRequires || queryRequiresApproval(query) || answerRequiresApproval(answer);
     }
 
+    /**
+     * 生成人工审核界面展示的敏感操作原因。
+     *
+     * @param query 用户原始问题
+     * @param answer 助手生成的回答
+     * @return 对应敏感操作类型的审核原因说明
+     */
     public static String resolveReason(String query, String answer) {
         if (queryRequiresApproval(query)) {
             return resolveQueryReason(query);

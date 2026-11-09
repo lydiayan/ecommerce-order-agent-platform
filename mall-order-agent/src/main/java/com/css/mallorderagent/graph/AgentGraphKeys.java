@@ -15,11 +15,18 @@ public final class AgentGraphKeys {
     public static final String RAG_ROLE_SCOPES = "ragRoleScopes";
     public static final String RAG_DEPARTMENT_SCOPES = "ragDepartmentScopes";
 
+    /** 当前请求对应的短期 SSE 会话；只在流式 HTTP 接口中存在 */
+    public static final String STREAM_ID = "streamId";
+
     public static final String HISTORY = "history";
     public static final String HISTORY_COUNT = "historyCount";
     public static final String USER_PROFILE_CONTEXT = "userProfileContext";
     public static final String LONG_TERM_MEMORY = "longTermMemory";
     public static final String MEMORY_COUNT = "memoryCount";
+    /** false 时仅使用调用方传入的临时历史，不读取或写入持久化记忆 */
+    public static final String MEMORY_ENABLED = "memoryEnabled";
+    /** 仅由管理员调试入口开启，交由模型服务执行受控的联网检索 */
+    public static final String WEB_SEARCH_ENABLED = "webSearchEnabled";
 
     public static final String RETRIEVAL = "retrieval";
     public static final String CONTEXT = "context";
@@ -28,7 +35,16 @@ public final class AgentGraphKeys {
 
     public static final String PLAN = "plan";
     public static final String PLAN_STRATEGY = "planStrategy";
+    public static final String INTENT = "intent";
+    public static final String INTENT_SOURCE = "intentSource";
+    public static final String INTENT_CONFIDENCE = "intentConfidence";
+    public static final String RULE_MATCH_STATUS = "ruleMatchStatus";
+    public static final String CLARIFICATION_REQUIRED = "clarificationRequired";
     public static final String BUILT_PROMPT = "builtPrompt";
+    public static final String SELECTED_SKILL_NAME = "selectedSkillName";
+    public static final String SELECTED_SKILL_VERSION_ID = "selectedSkillVersionId";
+    public static final String SELECTED_SKILL_DIGEST = "selectedSkillDigest";
+    public static final String SKILL_INSTRUCTIONS = "skillInstructions";
 
     public static final String TOOL_RESULT = "toolResult";
 

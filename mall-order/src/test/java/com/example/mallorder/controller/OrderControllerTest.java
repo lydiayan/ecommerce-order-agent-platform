@@ -12,6 +12,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.util.List;
 
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -29,7 +30,9 @@ class OrderControllerTest {
 
     @BeforeEach
     void setUp() {
-        mockMvc = standaloneSetup(new OrderController(orderService)).build();
+        mockMvc = standaloneSetup(new OrderController(orderService))
+                .setControllerAdvice(new OrderApiExceptionHandler())
+                .build();
     }
 
     @Test
@@ -64,5 +67,33 @@ class OrderControllerTest {
                         .jsonPath("$.decision").value("ELIGIBLE"))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
                         .jsonPath("$.reasonCodes[0]").value("PAID_AND_NOT_SHIPPED"));
+    }
+
+    @Test
+    void afterSalesBusinessRejectionReturnsStableJsonContract() throws Exception {
+        RefundEligibilityResult eligibility = new RefundEligibilityResult(
+                "ORD20260810003", "USER1002", RefundDecision.INELIGIBLE,
+                RefundOperationType.RETURN_AND_REFUND, "refund-v2026.08.18",
+                List.of("RETURN_WINDOW_EXPIRED"), List.of(), RefundNextAction.NONE,
+                null, null, List.of());
+        doThrow(new AfterSalesRejectionException(eligibility))
+                .when(orderService).submitAfterSalesRequest(
+                        org.mockito.ArgumentMatchers.eq("ORD20260810003"),
+                        org.mockito.ArgumentMatchers.any(AfterSalesSubmissionCommand.class));
+
+        mockMvc.perform(post("/orders/{orderId}/after-sales", "ORD20260810003")
+                        .contentType("application/json")
+                        .content("""
+                                {"userId":"USER1002","operationType":"退货"}
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .jsonPath("$.errorType").value("BUSINESS_REJECTION"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .jsonPath("$.message").value("该订单已超过7天退货期限"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .jsonPath("$.decision").value("INELIGIBLE"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .jsonPath("$.reasonCodes[0]").value("RETURN_WINDOW_EXPIRED"));
     }
 }

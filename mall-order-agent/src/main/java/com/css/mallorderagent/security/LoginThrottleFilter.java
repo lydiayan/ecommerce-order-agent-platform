@@ -24,11 +24,15 @@ public class LoginThrottleFilter extends OncePerRequestFilter {
         this.objectMapper = objectMapper;
     }
 
+    /** @return 不是登录提交请求时返回 {@code true}，跳过来源 IP 限流 */
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         return !("POST".equals(request.getMethod()) && "/auth/login".equals(request.getRequestURI()));
     }
 
+    /**
+     * 在认证前检查来源 IP 失败次数；达到阈值返回 429，限流存储不可用时返回 503。
+     */
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {

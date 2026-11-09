@@ -30,6 +30,17 @@ public class TraceEvent {
     private Map<String, Object> attributes = new LinkedHashMap<>();
     private String errorMessage;
 
+    /**
+     * 创建带唯一事件编号、默认成功状态和当前双格式时间戳的 Trace 事件。
+     *
+     * @param eventType 事件类型
+     * @param traceId Trace 编号
+     * @param spanId Span 编号
+     * @param parentSpanId 父 Span 编号，根节点为空
+     * @param operation 操作名称
+     * @param serviceName 来源服务名称
+     * @return 初始化后的 Trace 事件
+     */
     public static TraceEvent create(TraceEventType eventType,
                                     String traceId,
                                     String spanId,

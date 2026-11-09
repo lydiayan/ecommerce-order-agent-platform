@@ -31,6 +31,10 @@ public class SessionGuardFilter extends OncePerRequestFilter {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * 对已认证会话执行并发登录、绝对有效期、认证版本、身份模拟期限和强制改密检查。
+     * 失效会话会被清除；改密期间只允许访问完成改密所需的最小端点。
+     */
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {

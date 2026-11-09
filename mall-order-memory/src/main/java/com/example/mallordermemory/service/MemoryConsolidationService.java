@@ -55,6 +55,10 @@ public class MemoryConsolidationService {
         this.userProfileMergeService = userProfileMergeService;
     }
 
+    /**
+     * 定时扫描短期记忆会话，只合并达到消息数或 Token 阈值的增量消息。
+     * 单个会话失败不会阻止其他会话继续处理。
+     */
     @Scheduled(fixedDelayString = "#{@memoryConsolidationProperties.intervalMs}")
     public void scheduledConsolidation() {
         log.debug("scheduledConsolidation tick");
@@ -84,15 +88,28 @@ public class MemoryConsolidationService {
         }
     }
 
+    /**
+     * 立即合并配置的默认用户和默认会话。
+     */
     public void consolidate() {
         consolidate(defaultUserId, defaultSessionId);
     }
 
+    /**
+     * 立即合并默认用户的指定会话。
+     *
+     * @param sessionId 会话编号
+     */
     public void consolidate(String sessionId) {
         consolidate(defaultUserId, sessionId);
     }
 
     /**
+     * 合并上次游标之后的增量消息：画像写入 MySQL，其他记忆向量化后写入 Milvus，
+     * 最后推进游标。单条长期记忆写入失败会被跳过。
+     *
+     * @param userId 用户编号
+     * @param sessionId 会话编号
      * @return 实际新写入条数；无增量消息时返回 0
      */
     public int consolidate(String userId, String sessionId) {
@@ -157,6 +174,12 @@ public class MemoryConsolidationService {
         return storedCount;
     }
 
+    /**
+     * 判断会话是否同时满足最小消息量及增量消息数或 Token 阈值。
+     *
+     * @param session 用户与会话复合键
+     * @return 应执行合并时返回 {@code true}
+     */
     public boolean shouldConsolidate(MemorySessionKey session) {
         int messageCount = hybridMemoryManager.getShortTerm().getMessageCount(session.userId(), session.sessionId());
         if (messageCount < minMessagesForConsolidation) {

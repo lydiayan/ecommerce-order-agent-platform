@@ -27,14 +27,29 @@ public class RagTraceService {
         this.properties = properties;
     }
 
+    /** @return 当前是否启用 Trace 事件采集 */
     public boolean isEnabled() {
         return properties.isEnabled();
     }
 
+    /**
+     * 为操作创建新的根 Trace，不附加初始属性。
+     *
+     * @param operation 根操作名称
+     * @return 可用于 try-with-resources 的作用域；未启用时返回空作用域
+     */
     public RagTraceScope begin(String operation) {
         return begin(operation, Map.of());
     }
 
+    /**
+     * 清空当前线程旧上下文并创建根 Trace，同时发布 TRACE_START 和 SPAN_START。
+     * 属性在发布前会移除原始业务和模型载荷。
+     *
+     * @param operation 根操作名称
+     * @param attributes 初始非敏感属性
+     * @return 根 Trace 作用域
+     */
     public RagTraceScope begin(String operation, Map<String, Object> attributes) {
         if (!properties.isEnabled()) {
             return RagTraceScope.noop();
@@ -61,6 +76,13 @@ public class RagTraceService {
         return new RagTraceScope(this, context, operation, safeAttributes(attributes));
     }
 
+    /**
+     * 在当前线程栈顶 Span 下创建子 Span；没有父上下文时自动创建根 Trace。
+     *
+     * @param operation 子操作名称
+     * @param attributes 初始非敏感属性
+     * @return 子 Span 或新的根 Trace 作用域
+     */
     public RagTraceScope childSpan(String operation, Map<String, Object> attributes) {
         Deque<SpanContext> stack = spanStack.get();
         SpanContext parent = stack.peek();
@@ -71,7 +93,13 @@ public class RagTraceService {
     }
 
     /**
-     * 在指定父 span 下创建子 span（不依赖 ThreadLocal 栈顶，供跨 Advisor 线程使用）。
+     * 在指定父 Span 下创建子 Span，不依赖 ThreadLocal 栈顶，供跨 Advisor 线程传播上下文。
+     * LLM Span 的开始属性会延迟合并到结束事件，避免重复的模型事件。
+     *
+     * @param parent 显式父 Span 上下文
+     * @param operation 子操作名称
+     * @param attributes 初始非敏感属性
+     * @return 子 Span 作用域
      */
     public RagTraceScope childSpan(SpanContext parent, String operation, Map<String, Object> attributes) {
         if (parent == null) {
@@ -100,6 +128,12 @@ public class RagTraceService {
         return new RagTraceScope(this, child, operation, llmSpan ? startAttributes : Map.of());
     }
 
+    /**
+     * 在当前 Span 下创建无初始属性的子 Span。
+     *
+     * @param operation 子操作名称
+     * @return 子 Span 作用域
+     */
     public RagTraceScope childSpan(String operation) {
         return childSpan(operation, Map.of());
     }
@@ -147,6 +181,11 @@ public class RagTraceService {
         }
     }
 
+    /**
+     * 读取当前线程 Span 栈顶所属的 Trace 编号。
+     *
+     * @return 当前 Trace 编号；没有活动 Span 时返回 {@code null}
+     */
     public String currentTraceId() {
         Deque<SpanContext> stack = spanStack.get();
         SpanContext ctx = stack.peek();

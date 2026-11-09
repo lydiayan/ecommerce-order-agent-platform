@@ -54,7 +54,14 @@ public class UserProfileMergeService {
     }
 
     /**
-     * @return 是否写入了 MySQL
+     * 让模型根据增量对话和已有画像生成完整画像，并以版本递增方式写入 MySQL。
+     * 模型输出无效或调用失败时记录日志并保持原画像不变。
+     *
+     * @param userId 用户编号
+     * @param sessionId 本次画像来源的会话编号
+     * @param conversationText 增量对话文本
+     * @param profileHints 规则抽取出的画像线索
+     * @return 实际写入 MySQL 时返回 {@code true}
      */
     public boolean mergeFromConversation(String userId,
                                          String sessionId,

@@ -45,6 +45,14 @@ public class RedisShortTermMemoryStore {
         this.ttlSeconds = ttlSeconds;
     }
 
+    /**
+     * 向会话消息列表追加一条 JSON 消息，并刷新 TTL、裁剪到最大长度。
+     *
+     * @param session 用户与会话复合键
+     * @param role 消息角色
+     * @param content 消息内容
+     * @return 带生成编号和时间戳的已保存消息
+     */
     public ShortTermMessage append(MemorySessionKey session, MessageRole role, String content) {
         String redisKey = messageKey(session);
         long now = System.currentTimeMillis() / 1000;
@@ -66,10 +74,23 @@ public class RedisShortTermMemoryStore {
         }
     }
 
+    /**
+     * 读取会话当前保留的全部短期消息。
+     *
+     * @param session 用户与会话复合键
+     * @return 按写入顺序排列的消息
+     */
     public List<ShortTermMessage> listAll(MemorySessionKey session) {
         return parseList(redisTemplate.opsForList().range(messageKey(session), 0, -1));
     }
 
+    /**
+     * 读取会话最近若干条短期消息。
+     *
+     * @param session 用户与会话复合键
+     * @param count 请求条数；非正数返回空列表
+     * @return 保持时间顺序的最近消息
+     */
     public List<ShortTermMessage> listRecent(MemorySessionKey session, int count) {
         if (count <= 0) {
             return List.of();
@@ -79,7 +100,12 @@ public class RedisShortTermMemoryStore {
     }
 
     /**
-     * 返回严格在 {@code afterMessageId} 之后的消息（不含该 ID 本身）。
+     * 返回严格在指定消息之后的增量消息，不包含游标消息本身。
+     * 如果游标已因列表裁剪而不存在，则返回当前全部消息，避免增量永久丢失。
+     *
+     * @param session 用户与会话复合键
+     * @param afterMessageId 上次已处理的消息编号，可为空
+     * @return 待处理的增量消息
      */
     public List<ShortTermMessage> listAfter(MemorySessionKey session, String afterMessageId) {
         List<ShortTermMessage> all = listAll(session);
@@ -107,16 +133,32 @@ public class RedisShortTermMemoryStore {
         return new ArrayList<>(all.subList(startIndex, all.size()));
     }
 
+    /**
+     * 读取会话当前短期消息数量。
+     *
+     * @param session 用户与会话复合键
+     * @return Redis 列表长度
+     */
     public int messageCount(MemorySessionKey session) {
         Long size = redisTemplate.opsForList().size(messageKey(session));
         return size != null ? size.intValue() : 0;
     }
 
+    /**
+     * 同时删除会话消息和对应合并游标。
+     *
+     * @param session 用户与会话复合键
+     */
     public void clear(MemorySessionKey session) {
         redisTemplate.delete(messageKey(session));
         redisTemplate.delete(cursorKey(session));
     }
 
+    /**
+     * 扫描消息 key 并还原当前短期记忆会话。
+     *
+     * @return 可解析的用户与会话复合键
+     */
     public List<MemorySessionKey> listSessions() {
         Set<String> keys = redisTemplate.keys(keyPrefix + "*");
         if (keys == null || keys.isEmpty()) {
@@ -128,6 +170,12 @@ public class RedisShortTermMemoryStore {
                 .collect(Collectors.toList());
     }
 
+    /**
+     * 读取会话合并游标，游标缺失或内容损坏时返回空游标。
+     *
+     * @param session 用户与会话复合键
+     * @return 非空合并游标
+     */
     public ConsolidationCursor getCursor(MemorySessionKey session) {
         String raw = redisTemplate.opsForValue().get(cursorKey(session));
         if (raw == null || raw.isBlank()) {
@@ -141,6 +189,12 @@ public class RedisShortTermMemoryStore {
         }
     }
 
+    /**
+     * 保存会话合并游标，并使其 TTL 与短期记忆一致。
+     *
+     * @param session 用户与会话复合键
+     * @param cursor 待保存游标
+     */
     public void saveCursor(MemorySessionKey session, ConsolidationCursor cursor) {
         try {
             String json = objectMapper.writeValueAsString(cursor);
@@ -152,6 +206,13 @@ public class RedisShortTermMemoryStore {
         }
     }
 
+    /**
+     * 原子流程内读取游标、累加待合并统计并刷新游标 TTL。
+     *
+     * @param session 用户与会话复合键
+     * @param messages 新增消息数
+     * @param tokens 新增估算 Token 数
+     */
     public void addPending(MemorySessionKey session, int messages, int tokens) {
         ConsolidationCursor cursor = getCursor(session);
         cursor.addPending(messages, tokens);

@@ -16,10 +16,22 @@ public record MemorySessionKey(String userId, String sessionId) {
         sessionId = sessionId.trim();
     }
 
+    /**
+     * 创建并校验用户与会话复合键。
+     *
+     * @param userId 用户编号
+     * @param sessionId 会话编号
+     * @return 去除首尾空白后的复合键
+     */
     public static MemorySessionKey of(String userId, String sessionId) {
         return new MemorySessionKey(userId, sessionId);
     }
 
+    /**
+     * 生成 Redis key 使用的用户与会话后缀。
+     *
+     * @return {@code userId:sessionId} 格式后缀
+     */
     public String redisKeySuffix() {
         return userId + ":" + sessionId;
     }

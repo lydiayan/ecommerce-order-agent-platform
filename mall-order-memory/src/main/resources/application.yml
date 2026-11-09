@@ -19,6 +19,9 @@ memory:
     milvus:
       host: ${MILVUS_HOST:127.0.0.1}
       port: ${MILVUS_PORT:29530}
+      rpc-timeout-millis: ${MILVUS_RPC_TIMEOUT_MILLIS:10000}
+      max-retry-times: ${MILVUS_MAX_RETRY_TIMES:1}
+      retry-interval-millis: ${MILVUS_RETRY_INTERVAL_MILLIS:100}
 
   extractor:
     enabled: true

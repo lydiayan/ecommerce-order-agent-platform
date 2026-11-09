@@ -146,7 +146,7 @@
                 <configuration>
                     <release>${java.version}</release>
                     <compilerArgs>
-                        <compilerArg>-parameters</compilerArg>
+                        <arg>-parameters</arg>
                     </compilerArgs>
                 </configuration>
             </plugin>

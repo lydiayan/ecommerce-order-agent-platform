@@ -1,6 +1,7 @@
 package com.css.mallorderagent;
 
 import com.css.mallorderagent.config.OrderAgentProperties;
+import com.css.mallorderagent.config.FeedbackProperties;
 import com.css.mallorderagent.security.AuthProperties;
 import com.example.mallordermilvusrag.MallOrderMilvusRagApplication;
 import org.springframework.boot.SpringApplication;
@@ -10,6 +11,7 @@ import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.context.annotation.Bean;
 import org.springframework.http.HttpHeaders;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.web.reactive.function.client.WebClient;
 
 @SpringBootApplication
@@ -20,7 +22,8 @@ import org.springframework.web.reactive.function.client.WebClient;
                 classes = MallOrderMilvusRagApplication.class
         )
 )
-@EnableConfigurationProperties({OrderAgentProperties.class, AuthProperties.class})
+@EnableConfigurationProperties({OrderAgentProperties.class, AuthProperties.class, FeedbackProperties.class})
+@EnableScheduling
 public class MallOrderAgentApplication {
 
     @Bean

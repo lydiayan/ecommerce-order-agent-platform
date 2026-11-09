@@ -35,6 +35,12 @@ public class OrderProxyController {
         this.identityService = identityService;
     }
 
+    /**
+     * 查询当前业务身份有权查看的订单，并对员工视角的敏感字段进行脱敏。
+     *
+     * @param principal 当前登录身份，用于解析业务角色、客户范围和能力
+     * @return 授权范围内的订单列表；下游订单服务异常时返回对应代理错误
+     */
     @GetMapping("/orders")
     public ApiResponse<List<MallOrderDto>> listOrders(
             @AuthenticationPrincipal SecurityUserPrincipal principal) {

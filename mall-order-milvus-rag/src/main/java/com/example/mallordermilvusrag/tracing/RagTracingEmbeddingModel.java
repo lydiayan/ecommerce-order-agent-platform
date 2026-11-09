@@ -31,6 +31,13 @@ public class RagTracingEmbeddingModel implements EmbeddingModel {
         this.ragTraceService = ragTraceService;
     }
 
+    /**
+     * 对单文本 embedding 调用自动创建子 Span，并记录输入长度和向量维度。
+     * 没有活动 Trace 时直接委托底层模型。
+     *
+     * @param text 待向量化文本
+     * @return embedding 向量
+     */
     @Override
     public float[] embed(String text) {
         if (!ragTraceService.isEnabled() || ragTraceService.currentTraceId() == null) {
@@ -51,11 +58,23 @@ public class RagTracingEmbeddingModel implements EmbeddingModel {
         }
     }
 
+    /**
+     * 使用文档正文执行受追踪的单文本 embedding。
+     *
+     * @param document 待向量化文档
+     * @return embedding 向量
+     */
     @Override
     public float[] embed(Document document) {
         return embed(document.getText());
     }
 
+    /**
+     * 直接委托完整 embedding 请求；批量调用不额外创建单文本 Span。
+     *
+     * @param request embedding 请求
+     * @return 模型响应
+     */
     @Override
     public EmbeddingResponse call(EmbeddingRequest request) {
         return delegate.call(request);

@@ -342,6 +342,16 @@ public class LongTermMemoryManager {
         return search(type, null, queryEmbedding, topK);
     }
 
+    /**
+     * 在指定用户范围内按向量检索一种或全部长期记忆类型。
+     * 用户画像存储于 MySQL，因此不会参与 Milvus 检索。
+     *
+     * @param type 记忆类型；为空时跨全部长期记忆集合检索
+     * @param userId 用户编号；非空时作为 Milvus 标量过滤条件
+     * @param queryEmbedding 查询向量
+     * @param topK 最大结果数
+     * @return 按余弦相似度降序排列的记忆
+     */
     public List<MemoryEntry> search(MemoryType type, String userId, float[] queryEmbedding, int topK) {
         if (queryEmbedding == null || queryEmbedding.length == 0) {
             return List.of();
@@ -518,6 +528,12 @@ public class LongTermMemoryManager {
         }
     }
 
+    /**
+     * 从全部长期记忆集合中删除指定用户的数据。
+     * 任一集合删除失败时抛出异常，使调用方能够报告重置不完整。
+     *
+     * @param userIds 要清理的用户编号
+     */
     public void deleteByUsers(List<String> userIds) {
         if (userIds == null || userIds.isEmpty()) {
             return;

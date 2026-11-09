@@ -18,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -67,5 +68,28 @@ class OrderServiceTest {
         ResponseStatusException error = assertThrows(ResponseStatusException.class,
                 () -> service.getOwnedOrder("ORD20260810003", "USER1001"));
         assertEquals(404, error.getStatusCode().value());
+    }
+
+    @Test
+    void ineligibleAfterSalesReturnsStructuredBusinessRejection() {
+        Order order = new Order();
+        order.setOrderId("ORD20260810003");
+        order.setUserId("USER1002");
+        when(orderMapper.selectOwnedOrder("ORD20260810003", "USER1002")).thenReturn(order);
+        when(orderMapper.selectOrderDetailsByOrderId("ORD20260810003")).thenReturn(List.of());
+        RefundEligibilityResult eligibility = new RefundEligibilityResult(
+                "ORD20260810003", "USER1002", RefundDecision.INELIGIBLE,
+                RefundOperationType.RETURN_AND_REFUND, RefundEligibilityService.POLICY_VERSION,
+                List.of("RETURN_WINDOW_EXPIRED"), List.of(), RefundNextAction.NONE,
+                null, null, List.of());
+        when(refundEligibilityService.evaluate(any(), any())).thenReturn(eligibility);
+        OrderService service = new OrderService(orderMapper, afterSalesRequestMapper, refundEligibilityService);
+
+        AfterSalesRejectionException error = assertThrows(AfterSalesRejectionException.class,
+                () -> service.submitAfterSalesRequest("ORD20260810003", "USER1002", "退货"));
+
+        assertEquals(409, error.getStatusCode().value());
+        assertEquals(eligibility, error.eligibility());
+        verify(afterSalesRequestMapper, never()).insertOrKeepExisting(any());
     }
 }

@@ -37,6 +37,12 @@ public class PlannerNode implements NodeAction {
         this.planner = planner;
     }
 
+    /**
+     * 识别当前问题意图、生成动作计划并在执行前校验身份能力边界。
+     *
+     * @param state 包含用户问题、身份能力和上轮 checkpoint 的 Graph 状态
+     * @return 本轮清理后的计划、分类结果、审批标记或能力拒绝回答
+     */
     @Override
     public Map<String, Object> apply(OverAllState state) {
         String query = AgentGraphSupport.resolveQuery(state);
@@ -55,9 +61,11 @@ public class PlannerNode implements NodeAction {
                 String denial = capabilityDenial(state, plan, query);
                 if (denial != null) {
                     PlanResult denied = new PlanResult("CAPABILITY_DENIED", List.of());
+                    copyClassification(plan, denied);
                     Map<String, Object> updates = resetTurnOutputs(query);
                     updates.put(AgentGraphKeys.PLAN, denied);
                     updates.put(AgentGraphKeys.PLAN_STRATEGY, denied.strategy());
+                    putClassification(updates, denied);
                     updates.put(AgentGraphKeys.ANSWER, denial);
                     return updates;
                 }
@@ -69,8 +77,23 @@ public class PlannerNode implements NodeAction {
                 plannerSpan.attribute("actionCount", actions.size());
                 plannerSpan.attribute("actions", actions);
                 plannerSpan.attribute("humanApprovalRequired", plan.humanApprovalRequired());
+                plannerSpan.attribute("intent", valueOrEmpty(plan.intent()));
+                plannerSpan.attribute("intentSource", valueOrEmpty(plan.intentSource()));
+                plannerSpan.attribute("intentConfidence", plan.intentConfidence());
+                plannerSpan.attribute("ruleMatchStatus", valueOrEmpty(plan.ruleMatchStatus()));
+                plannerSpan.attribute("clarificationRequired", plan.clarificationRequired());
                 if (plan.approvalReason() != null && !plan.approvalReason().isBlank()) {
                     plannerSpan.attribute("approvalReason", plan.approvalReason());
+                }
+                if (plan.classificationFallbackReason() != null
+                        && !plan.classificationFallbackReason().isBlank()) {
+                    plannerSpan.attribute("classificationFallbackReason",
+                            plan.classificationFallbackReason());
+                }
+                if (plan.skillName() != null) {
+                    plannerSpan.attribute("skillName", plan.skillName());
+                    plannerSpan.attribute("skillVersionId", plan.skillVersionId());
+                    plannerSpan.attribute("skillDigest", plan.skillDigest());
                 }
 
                 log.info("PlannerNode completed, strategy={}, actions={}, humanApproval={}",
@@ -79,9 +102,21 @@ public class PlannerNode implements NodeAction {
                 Map<String, Object> updates = resetTurnOutputs(query);
                 updates.put(AgentGraphKeys.PLAN, plan);
                 updates.put(AgentGraphKeys.PLAN_STRATEGY, plan.strategy());
+                putClassification(updates, plan);
                 updates.put(AgentGraphKeys.HUMAN_APPROVAL_REQUIRED, plan.humanApprovalRequired());
                 updates.put(AgentGraphKeys.APPROVAL_REASON,
                         plan.approvalReason() != null ? plan.approvalReason() : "");
+                updates.put(AgentGraphKeys.SELECTED_SKILL_NAME,
+                        plan.skillName() != null ? plan.skillName() : "");
+                updates.put(AgentGraphKeys.SELECTED_SKILL_VERSION_ID,
+                        plan.skillVersionId() != null ? plan.skillVersionId() : 0L);
+                updates.put(AgentGraphKeys.SELECTED_SKILL_DIGEST,
+                        plan.skillDigest() != null ? plan.skillDigest() : "");
+                updates.put(AgentGraphKeys.SKILL_INSTRUCTIONS,
+                        plan.skillInstructions() != null ? plan.skillInstructions() : "");
+                if (plan.clarificationRequired() && plan.clarificationMessage() != null) {
+                    updates.put(AgentGraphKeys.ANSWER, plan.clarificationMessage());
+                }
                 return updates;
             } catch (RuntimeException e) {
                 plannerSpan.error(e);
@@ -104,16 +139,45 @@ public class PlannerNode implements NodeAction {
         updates.put(AgentGraphKeys.NEXT_NODE, "");
         updates.put(AgentGraphKeys.HUMAN_APPROVAL_REQUIRED, false);
         updates.put(AgentGraphKeys.APPROVAL_REASON, "");
+        updates.put(AgentGraphKeys.INTENT, "");
+        updates.put(AgentGraphKeys.INTENT_SOURCE, "");
+        updates.put(AgentGraphKeys.INTENT_CONFIDENCE, 0D);
+        updates.put(AgentGraphKeys.RULE_MATCH_STATUS, "");
+        updates.put(AgentGraphKeys.CLARIFICATION_REQUIRED, false);
+        updates.put(AgentGraphKeys.SELECTED_SKILL_NAME, "");
+        updates.put(AgentGraphKeys.SELECTED_SKILL_VERSION_ID, 0L);
+        updates.put(AgentGraphKeys.SELECTED_SKILL_DIGEST, "");
+        updates.put(AgentGraphKeys.SKILL_INSTRUCTIONS, "");
         return updates;
+    }
+
+    private static void putClassification(Map<String, Object> updates, PlanResult plan) {
+        updates.put(AgentGraphKeys.INTENT, valueOrEmpty(plan.intent()));
+        updates.put(AgentGraphKeys.INTENT_SOURCE, valueOrEmpty(plan.intentSource()));
+        updates.put(AgentGraphKeys.INTENT_CONFIDENCE, plan.intentConfidence());
+        updates.put(AgentGraphKeys.RULE_MATCH_STATUS, valueOrEmpty(plan.ruleMatchStatus()));
+        updates.put(AgentGraphKeys.CLARIFICATION_REQUIRED, plan.clarificationRequired());
+    }
+
+    private static void copyClassification(PlanResult source, PlanResult target) {
+        target.setIntent(source.intent());
+        target.setIntentSource(source.intentSource());
+        target.setIntentConfidence(source.intentConfidence());
+        target.setRuleMatchStatus(source.ruleMatchStatus());
+        target.setClarificationRequired(source.clarificationRequired());
+        target.setClassificationFallbackReason(source.classificationFallbackReason());
+    }
+
+    private static String valueOrEmpty(String value) {
+        return value != null ? value : "";
     }
 
     private static String capabilityDenial(OverAllState state, PlanResult plan, String query) {
         if (!AgentGraphSupport.hasCapabilityContext(state)) {
             return null;
         }
-        if ("ORDER_QUERY".equals(plan.strategy())
-                || "ORDER_POLICY_QUERY".equals(plan.strategy())
-                || "DANGEROUS_ORDER_OP".equals(plan.strategy())) {
+        if (plan.hasAction(com.css.mallorderagent.planner.ActionDefinitions.ORDER_QUERY)
+                || plan.hasAction(com.css.mallorderagent.planner.ActionDefinitions.REFUND_ELIGIBILITY)) {
             boolean canRead = AgentGraphSupport.hasCapability(state, DemoCapability.OWN_ORDER_READ.name())
                     || AgentGraphSupport.hasCapability(state, DemoCapability.ASSIGNED_ORDER_READ.name());
             if (!canRead) {

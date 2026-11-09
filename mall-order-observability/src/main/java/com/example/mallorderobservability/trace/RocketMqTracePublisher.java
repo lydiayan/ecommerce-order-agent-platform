@@ -31,6 +31,12 @@ public class RocketMqTracePublisher implements TracePublisher {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * 先写本地结构化日志，再异步发送到 RocketMQ；序列化或异步发送失败只记录告警，
+     * 不阻断被观测的主业务请求。
+     *
+     * @param event 待发布 Trace 事件
+     */
     @Override
     public void publish(TraceEvent event) {
         fallback.publish(event);

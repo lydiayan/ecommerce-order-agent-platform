@@ -56,6 +56,10 @@ public class RagService {
             "id", "content", "source", "department", "role", "version", "create_time",
             "document_id", "parent_id", "chunk_level", "chunk_index", "total_chunks",
             "strategy", "content_type", "title_path", "start_offset", "end_offset");
+    private static final List<String> CATALOG_OUTPUT_FIELDS = List.of(
+            "id", "source", "department", "role", "version", "create_time", "document_id",
+            "chunk_level", "chunk_index", "total_chunks", "strategy", "content_type");
+    private static final long MAX_ADMIN_CHUNK_ROWS = 16_384L;
 
     private final MilvusServiceClient milvusClient;
     private final EmbeddingModel embeddingModel;
@@ -88,10 +92,19 @@ public class RagService {
 
     @PostConstruct
     void ensureCollection() {
-        R<Boolean> exists = milvusClient.hasCollection(HasCollectionParam.newBuilder()
-                .withCollectionName(collectionName).build());
+        R<Boolean> exists;
+        try {
+            exists = milvusClient.hasCollection(HasCollectionParam.newBuilder()
+                    .withCollectionName(collectionName).build());
+        } catch (RuntimeException e) {
+            log.warn("Milvus is unavailable during RAG initialization; continuing without knowledge search: {}",
+                    e.getMessage());
+            return;
+        }
         if (exists.getStatus() != R.Status.Success.getCode()) {
-            throw new IllegalStateException("Failed to check collection " + collectionName);
+            log.warn("Unable to check RAG collection {}; continuing without knowledge search: {}",
+                    collectionName, exists.getMessage());
+            return;
         }
 
         // 检查集合是否存在
@@ -100,9 +113,18 @@ public class RagService {
                 .build();
 
         if (Boolean.TRUE.equals(exists.getData())) {
-            R<DescribeCollectionResponse> describeResult = milvusClient.describeCollection(describeParam);
+            R<DescribeCollectionResponse> describeResult;
+            try {
+                describeResult = milvusClient.describeCollection(describeParam);
+            } catch (RuntimeException e) {
+                log.warn("Unable to describe RAG collection {}; continuing without knowledge search: {}",
+                        collectionName, e.getMessage());
+                return;
+            }
             if (describeResult.getStatus() != R.Status.Success.getCode()) {
-                throw new IllegalStateException("Failed to describe collection " + collectionName);
+                log.warn("Unable to describe RAG collection {}; continuing without knowledge search: {}",
+                        collectionName, describeResult.getMessage());
+                return;
             }
             Set<String> fields = describeResult.getData().getSchema().getFieldsList().stream()
                     .map(field -> field.getName()).collect(Collectors.toSet());
@@ -110,12 +132,12 @@ public class RagService {
             missing.add("embedding");
             missing.removeAll(fields);
             if (!missing.isEmpty()) {
-                throw new IllegalStateException("Collection " + collectionName
-                        + " uses an incompatible schema; missing fields: " + missing);
+                log.error("Collection {} uses an incompatible schema; missing fields: {}",
+                        collectionName, missing);
+                return;
             }
             log.info("Collection already exists: {}", collectionName);
-            loadCollection();
-            collectionReady = true;
+            collectionReady = loadCollection();
             return;
         }
 
@@ -234,24 +256,33 @@ public class RagService {
         createScalarIndex("chunk_level");
 
         // ── 加载集合到内存 ──
-        loadCollection();
-
-        collectionReady = true;
-        log.info("Collection {} initialized and loaded", collectionName);
+        collectionReady = loadCollection();
+        if (collectionReady) {
+            log.info("Collection {} initialized and loaded", collectionName);
+        }
     }
 
-    private void loadCollection() {
+    private boolean loadCollection() {
         LoadCollectionParam loadParam = LoadCollectionParam.newBuilder()
                 .withCollectionName(collectionName)
                 .withSyncLoad(true)
                 .withSyncLoadWaitingInterval(200L)
                 .withSyncLoadWaitingTimeout(30L)
                 .build();
-        R<RpcStatus> loadResult = milvusClient.loadCollection(loadParam);
-        if (loadResult.getStatus() != R.Status.Success.getCode()) {
-            throw new IllegalStateException("Failed to load collection " + collectionName
-                    + ": " + loadResult.getMessage());
+        R<RpcStatus> loadResult;
+        try {
+            loadResult = milvusClient.loadCollection(loadParam);
+        } catch (RuntimeException e) {
+            log.warn("Unable to load RAG collection {}; knowledge search remains unavailable: {}",
+                    collectionName, e.getMessage());
+            return false;
         }
+        if (loadResult.getStatus() != R.Status.Success.getCode()) {
+            log.warn("Unable to load RAG collection {}; knowledge search remains unavailable: {}",
+                    collectionName, loadResult.getMessage());
+            return false;
+        }
+        return true;
     }
 
     private void createScalarIndex(String fieldName) {
@@ -280,12 +311,26 @@ public class RagService {
     // ==================== 写操作 ====================
 
     /**
-     * 添加文档到向量库（自动分割 + embedding + 存储）
+     * 使用默认切分配置对文本分块、生成 embedding，并替换该文档在向量库中的分块。
+     *
+     * @param text 原始文本
+     * @param metadata 文档元数据和访问范围
+     * @return 持久化的分块编号
      */
     public List<String> addDocument(String text, DocumentMetadata metadata) {
         return addDocument(text, metadata, null, null, null);
     }
 
+    /**
+     * 按指定文档编号、策略和内容类型分块，并以文档为单位替换向量数据。
+     *
+     * @param text 原始文本
+     * @param metadata 文档元数据和访问范围
+     * @param documentId 可选稳定文档编号
+     * @param strategy 可选切分策略
+     * @param contentType 可选内容类型
+     * @return 持久化的分块编号
+     */
     public List<String> addDocument(String text, DocumentMetadata metadata, String documentId,
                                     RagSplitStrategy strategy, RagContentType contentType) {
         log.info("Adding document to vector store, text length={}", text.length());
@@ -297,7 +342,10 @@ public class RagService {
     }
 
     /**
-     * 批量添加文档
+     * 逐份切分并替换多篇文档的向量分块。
+     *
+     * @param inputs 文档输入列表
+     * @return 全部分块编号
      */
     public List<String> addDocuments(List<DocumentService.DocumentInput> inputs) {
         log.info("Adding {} documents to vector store", inputs.size());
@@ -312,8 +360,11 @@ public class RagService {
     }
 
     /**
-     * 直接添加已处理的文档列表（PDF 场景）
-     * 从每个文档的 Map metadata 中还原 DocumentMetadata
+     * 按 documentId 对已处理分块分组并替换向量数据，供 PDF 导入使用。
+     * 元数据从 Spring AI 文档的 Map 中还原。
+     *
+     * @param documents 已切分并带 embedding 输入信息的文档
+     * @return 持久化的分块编号
      */
     public List<String> addProcessedDocuments(List<Document> documents) {
         log.info("Adding {} processed documents to vector store", documents.size());
@@ -440,7 +491,11 @@ public class RagService {
     // ==================== 搜索 ====================
 
     /**
-     * 语义搜索（不带标量过滤）
+     * 使用默认阈值执行不带标量过滤的语义搜索。
+     *
+     * @param query 查询文本
+     * @param topK 最大召回数
+     * @return 检索结果
      */
     public SearchResponse search(String query, int topK) {
         SearchRequest request = new SearchRequest(query, topK);
@@ -448,7 +503,12 @@ public class RagService {
     }
 
     /**
-     * 带相似度阈值的语义搜索（不带标量过滤）
+     * 使用指定相似度阈值执行不带标量过滤的语义搜索。
+     *
+     * @param query 查询文本
+     * @param topK 最大召回数
+     * @param similarityThreshold 最低相似度
+     * @return 过滤后的检索结果
      */
     public SearchResponse searchWithThreshold(String query, int topK, double similarityThreshold) {
         SearchRequest request = new SearchRequest(query, topK);
@@ -457,7 +517,14 @@ public class RagService {
     }
 
     /**
-     * 带标量过滤的语义搜索
+     * 使用调用方提供的 Milvus 标量表达式执行语义搜索。
+     * 启用统一追踪时，访问范围仍由请求字段构造，不能绕过授权过滤。
+     *
+     * @param query 查询文本
+     * @param topK 最大召回数
+     * @param threshold 最低相似度
+     * @param filterExpr Milvus 标量过滤表达式
+     * @return 检索结果
      */
     public SearchResponse searchWithFilter(String query, int topK, double threshold, String filterExpr) {
         SearchRequest request = new SearchRequest(query, topK);
@@ -469,14 +536,21 @@ public class RagService {
     }
 
     /**
-     * 完整搜索：Milvus 召回 →（可选）qwen3-rerank 重排序。
+     * 执行完整搜索：构造访问范围过滤、Milvus 召回并按配置选择重排。
+     *
+     * @param request 查询和检索控制参数
+     * @return 带召回分数、重排分数和 trace 的结果
      */
     public SearchResponse search(SearchRequest request) {
         return search(request, null);
     }
 
     /**
-     * 在已有 trace 下执行搜索（用于 rag.ask 的 retrieve 子 span）。
+     * 在已有 trace 下执行搜索，供 RAG 问答把检索记录为子 Span。
+     *
+     * @param request 查询和检索控制参数
+     * @param parentTrace 可选父追踪范围
+     * @return 检索结果
      */
     public SearchResponse search(SearchRequest request, RagTraceScope parentTrace) {
         String filterExpr = buildFilterExpression(
@@ -605,7 +679,16 @@ public class RagService {
         searchBuilder.withExpr(filterExpr == null || filterExpr.isBlank()
                 ? searchableChunks : searchableChunks + " && (" + filterExpr + ")");
 
-        R<SearchResults> searchResult = milvusClient.search(searchBuilder.build());
+        R<SearchResults> searchResult;
+        try {
+            searchResult = milvusClient.search(searchBuilder.build());
+        } catch (RuntimeException e) {
+            // A vector store outage must degrade to an empty knowledge result. The Agent
+            // can still answer from tools or report that knowledge retrieval is unavailable;
+            // propagating the SDK exception would otherwise terminate the SSE stream.
+            log.warn("Milvus search unavailable, returning empty results: {}", e.getMessage());
+            return List.of();
+        }
         if (searchResult.getStatus() != R.Status.Success.getCode()) {
             log.warn("Search failed: {}", searchResult.getMessage());
             return List.of();
@@ -751,7 +834,13 @@ public class RagService {
                 .withOutFields(CHUNK_OUTPUT_FIELDS)
                 .withConsistencyLevel(ConsistencyLevelEnum.EVENTUALLY)
                 .build();
-        R<QueryResults> result = milvusClient.query(param);
+        R<QueryResults> result;
+        try {
+            result = milvusClient.query(param);
+        } catch (RuntimeException e) {
+            log.warn("Milvus parent query unavailable, returning best child chunks: {}", e.getMessage());
+            return Map.of();
+        }
         if (result.getStatus() != R.Status.Success.getCode()) {
             log.warn("Parent query failed: {}", result.getMessage());
             return Map.of();
@@ -763,6 +852,77 @@ public class RagService {
             parents.put(hit.getId(), hit);
         }
         return parents;
+    }
+
+    /**
+     * Reads persisted chunks for the administrator knowledge-base view. This path performs only
+     * a scalar Milvus query; it does not invoke embedding, rerank, or chat models.
+     */
+    public List<SearchResponse.SearchHit> listChunksBySources(Collection<String> sources) {
+        if (!collectionReady || sources == null || sources.isEmpty()) {
+            return List.of();
+        }
+        List<String> normalized = sources.stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .distinct()
+                .toList();
+        if (normalized.isEmpty()) {
+            return List.of();
+        }
+
+        String expr = normalized.stream()
+                .map(value -> "\"" + escapeExpr(value) + "\"")
+                .collect(Collectors.joining(",", "source in [", "]"));
+        return queryAdminChunks(expr, CHUNK_OUTPUT_FIELDS);
+    }
+
+    /**
+     * 读取管理查询上限内的全部持久化分块，不调用模型。
+     *
+     * @return 按来源和分块序号排序的分块
+     */
+    public List<SearchResponse.SearchHit> listAllChunks() {
+        if (!collectionReady) {
+            return List.of();
+        }
+        return queryAdminChunks("id != \"\"", CATALOG_OUTPUT_FIELDS);
+    }
+
+    /**
+     * 按单个来源读取持久化分块。
+     *
+     * @param source 文档来源
+     * @return 对应分块；来源为空时返回空列表
+     */
+    public List<SearchResponse.SearchHit> listChunksBySource(String source) {
+        return source == null ? List.of() : listChunksBySources(List.of(source));
+    }
+
+    private List<SearchResponse.SearchHit> queryAdminChunks(String expr, List<String> outputFields) {
+        QueryParam param = QueryParam.newBuilder()
+                .withCollectionName(collectionName)
+                .withExpr(expr)
+                .withOutFields(outputFields)
+                .withConsistencyLevel(ConsistencyLevelEnum.STRONG)
+                .withLimit(MAX_ADMIN_CHUNK_ROWS)
+                .build();
+        R<QueryResults> result = milvusClient.query(param);
+        if (result.getStatus() != R.Status.Success.getCode()) {
+            throw new IllegalStateException("Failed to load knowledge chunks: " + result.getMessage());
+        }
+        List<QueryResultsWrapper.RowRecord> rows =
+                new QueryResultsWrapper(result.getData()).getRowRecords();
+        if (rows.size() >= MAX_ADMIN_CHUNK_ROWS) {
+            throw new IllegalStateException("Knowledge chunk query reached the administrative row limit");
+        }
+        return rows.stream()
+                .map(row -> hitFromRow(row.getFieldValues()))
+                .sorted(Comparator
+                        .comparing((SearchResponse.SearchHit hit) -> hit.getMetadata().getSource())
+                        .thenComparingInt(SearchResponse.SearchHit::getChunkIndex))
+                .toList();
     }
 
     private static SearchResponse.SearchHit hitFromRow(Map<String, Object> values) {
@@ -798,11 +958,28 @@ public class RagService {
     /**
      * 构建 Milvus 标量过滤表达式。各过滤条件之间为 AND 关系。
      */
+    /**
+     * 构建单值来源、部门、角色和版本之间为 AND 关系的 Milvus 过滤表达式。
+     *
+     * @return 可为空字符串的过滤表达式
+     */
     public static String buildFilterExpression(String source, String department,
                                                 String role, String version) {
         return buildFilterExpression(source, department, role, version, null, null);
     }
 
+    /**
+     * 构建业务过滤与访问范围过滤表达式；角色与部门范围内部为 OR，
+     * 再与来源、版本等业务条件组合为 AND。
+     *
+     * @param source 可选来源
+     * @param department 可选单部门过滤
+     * @param role 可选单角色过滤
+     * @param version 可选版本
+     * @param departments 可访问部门集合
+     * @param roles 可访问角色集合
+     * @return 已转义的 Milvus 标量过滤表达式
+     */
     public static String buildFilterExpression(String source, String department,
                                                 String role, String version,
                                                 List<String> departments, List<String> roles) {

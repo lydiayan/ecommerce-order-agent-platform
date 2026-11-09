@@ -19,11 +19,22 @@ public class ApiTokenAuthenticationFilter extends OncePerRequestFilter {
         this.tokenRepository = tokenRepository;
     }
 
+    /**
+     * 仅对内部评测和反馈接口启用 API Token 认证。
+     *
+     * @param request 当前请求
+     * @return 不属于内部接口时返回 {@code true}
+     */
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return !request.getRequestURI().startsWith("/internal/evaluation/");
+        return !(request.getRequestURI().startsWith("/internal/evaluation/")
+                || request.getRequestURI().startsWith("/internal/feedback/"));
     }
 
+    /**
+     * 解析 Bearer Token，并把有效 Token 的 scopes 转换为当前请求的授权能力。
+     * 无效或缺失 Token 不直接返回错误，后续由 Spring Security 授权规则拒绝。
+     */
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {

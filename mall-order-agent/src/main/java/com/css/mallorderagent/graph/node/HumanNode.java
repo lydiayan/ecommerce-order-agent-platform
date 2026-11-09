@@ -41,6 +41,12 @@ public class HumanNode implements NodeAction, InterruptableAction {
     /** 人工要求重写时回到 Planner 节点（重新规划后再 Prompt） */
     public static final String NEXT_PLANNER = PlannerNode.NODE_NAME;
 
+    /**
+     * 消费恢复 Graph 时写入的人工反馈，并决定进入执行、回答、重新规划或结束。
+     *
+     * @param state 包含审核反馈、计划策略和当前回答的 Graph 状态
+     * @return 下一节点、修订问题或取消提示等状态增量
+     */
     @Override
     public Map<String, Object> apply(OverAllState state) {
         Map<String, Object> startAttributes = traceAttributes(state);
@@ -90,6 +96,14 @@ public class HumanNode implements NodeAction, InterruptableAction {
         }
     }
 
+    /**
+     * 在需要人工审核且尚无反馈时中断 Graph，并构造前端恢复所需元数据。
+     *
+     * @param nodeId 当前 Graph 节点编号
+     * @param state 包含回答、问题、策略和审批标记的 Graph 状态
+     * @param config 当前 Graph 运行配置
+     * @return 需要暂停时返回中断元数据，否则返回 empty
+     */
     @Override
     public Optional<InterruptionMetadata> interrupt(String nodeId, OverAllState state, RunnableConfig config) {
         Map<String, Object> startAttributes = traceAttributes(state);

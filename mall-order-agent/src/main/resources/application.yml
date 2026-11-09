@@ -1,16 +1,22 @@
 server:
   address: ${SERVER_ADDRESS:127.0.0.1}
   port: ${SERVER_PORT:8087}
+  forward-headers-strategy: framework
 
 spring:
   application:
     name: mall-order-agent
 
+  servlet:
+    multipart:
+      max-file-size: ${RAG_PDF_MAX_FILE_SIZE:20MB}
+      max-request-size: ${RAG_PDF_MAX_REQUEST_SIZE:22MB}
+
   config:
     import: classpath:rag.yml
 
   datasource:
-    url: ${AGENT_MEMORY_DATASOURCE_URL:jdbc:mysql://127.0.0.1:13306/agent_memory?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
+    url: ${AGENT_MEMORY_DATASOURCE_URL:jdbc:mysql://127.0.0.1:3306/agent_memory?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
     username: ${MYSQL_USER:portfolio}
     password: ${MYSQL_PASSWORD:portfolio}
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -34,6 +40,14 @@ spring:
       repository-type: indexed
 
   ai:
+    # Remote model outages must fail fast so the browser can finish the SSE request
+    # and show an actionable error instead of remaining in "处理中" for minutes.
+    retry:
+      max-attempts: ${AI_RETRY_MAX_ATTEMPTS:1}
+      backoff:
+        initial-interval: ${AI_RETRY_INITIAL_INTERVAL:100ms}
+        multiplier: ${AI_RETRY_BACKOFF_MULTIPLIER:2}
+        max-interval: ${AI_RETRY_MAX_INTERVAL:500ms}
     openai:
       api-key: ${DASHSCOPE_API_KEY:missing}
       base-url: ${DASHSCOPE_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
@@ -42,7 +56,7 @@ spring:
           model: text-embedding-v2
       chat:
         options:
-          model: qwen-plus
+          model: ${AGENT_MODEL_NAME:qwen-plus}
           temperature: 0.3
     mcp:
       client:
@@ -90,6 +104,46 @@ agent:
     mcp-service-token: ${MCP_SERVICE_TOKEN:local-mcp-service-token-change-me}
   conversation:
     max-turns: 10
+  streaming:
+    timeout-millis: ${AGENT_STREAM_TIMEOUT_MILLIS:180000}
+    max-active-streams: ${AGENT_STREAM_MAX_ACTIVE:100}
+    core-pool-size: ${AGENT_STREAM_CORE_POOL_SIZE:4}
+    max-pool-size: ${AGENT_STREAM_MAX_POOL_SIZE:16}
+    queue-capacity: ${AGENT_STREAM_QUEUE_CAPACITY:64}
+  intent:
+    llm-enabled: ${AGENT_INTENT_LLM_ENABLED:true}
+    model: ${AGENT_INTENT_MODEL_NAME:qwen-turbo}
+    confidence-threshold: ${AGENT_INTENT_CONFIDENCE_THRESHOLD:0.80}
+    max-query-length: ${AGENT_INTENT_MAX_QUERY_LENGTH:2000}
+  skill:
+    enabled: ${AGENT_SKILL_ENABLED:true}
+    storage-directory: ${AGENT_SKILL_STORAGE_DIRECTORY:data/skills}
+    allowed-hosts: ${AGENT_SKILL_ALLOWED_HOSTS:github.com,codeload.github.com,gitlab.com}
+    allow-private-hosts: ${AGENT_SKILL_ALLOW_PRIVATE_HOSTS:false}
+    connect-timeout-millis: ${AGENT_SKILL_CONNECT_TIMEOUT_MILLIS:5000}
+    read-timeout-millis: ${AGENT_SKILL_READ_TIMEOUT_MILLIS:15000}
+    max-redirects: ${AGENT_SKILL_MAX_REDIRECTS:3}
+    max-archive-bytes: ${AGENT_SKILL_MAX_ARCHIVE_BYTES:10485760}
+    max-package-bytes: ${AGENT_SKILL_MAX_PACKAGE_BYTES:2097152}
+    max-file-bytes: ${AGENT_SKILL_MAX_FILE_BYTES:524288}
+    max-files: ${AGENT_SKILL_MAX_FILES:200}
+  feedback:
+    enabled: ${AGENT_FEEDBACK_ENABLED:true}
+    retention-days: ${AGENT_FEEDBACK_RETENTION_DAYS:90}
+    encryption-key: ${AGENT_FEEDBACK_ENCRYPTION_KEY:local-feedback-key-change-before-production}
+    model-name: ${AGENT_MODEL_NAME:qwen-plus}
+    agent-version: ${AGENT_VERSION:dev}
+    sync:
+      enabled: ${AGENT_FEEDBACK_SYNC_ENABLED:true}
+      topic: ${AGENT_FEEDBACK_SYNC_TOPIC:agent-feedback-events}
+      tag: ${AGENT_FEEDBACK_SYNC_TAG:feedback}
+      poll-interval-ms: ${AGENT_FEEDBACK_SYNC_POLL_INTERVAL_MS:1000}
+      batch-size: ${AGENT_FEEDBACK_SYNC_BATCH_SIZE:50}
+      max-attempts: ${AGENT_FEEDBACK_SYNC_MAX_ATTEMPTS:8}
+  evaluation:
+    sync:
+      topic: ${AGENT_EVALUATION_SYNC_TOPIC:agent-evaluation-events}
+      tag: ${AGENT_EVALUATION_SYNC_TAG:evaluation}
   graph:
     human-review-enabled: true # 敏感操作人工审核（退货/付款/删除/确认类回复）
   order:
@@ -115,6 +169,9 @@ memory:
     milvus:
       host: ${MILVUS_HOST:127.0.0.1}
       port: ${MILVUS_PORT:29530}
+      rpc-timeout-millis: ${MILVUS_RPC_TIMEOUT_MILLIS:10000}
+      max-retry-times: ${MILVUS_MAX_RETRY_TIMES:1}
+      retry-interval-millis: ${MILVUS_RETRY_INTERVAL_MILLIS:100}
   extractor:
     enabled: true
   consolidation:

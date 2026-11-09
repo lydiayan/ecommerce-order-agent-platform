@@ -15,6 +15,13 @@ public class ClientIpResolver {
         this.trustedProxies = new HashSet<>(properties.getTrustedProxies());
     }
 
+    /**
+     * 解析安全边界内的客户端 IP；仅当直接来源属于可信代理时才读取
+     * {@code X-Forwarded-For}，并从代理链末端跳过可信节点。
+     *
+     * @param request 当前 HTTP 请求
+     * @return 清洗并限制长度后的客户端 IP，无法识别时返回 {@code unknown}
+     */
     public String resolve(HttpServletRequest request) {
         String remote = safe(request.getRemoteAddr());
         if (!trustedProxies.contains(remote)) return remote;

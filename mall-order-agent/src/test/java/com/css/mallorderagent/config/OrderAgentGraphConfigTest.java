@@ -77,10 +77,14 @@ class OrderAgentGraphConfigTest {
         RunnableConfig runnableConfig = RunnableConfig.builder().threadId("same-conversation").build();
 
         NodeOutput first = compiledGraph.invokeAndGetOutput(
-                        Map.of(AgentGraphKeys.QUERY, "查询订单 ORD20260810001 的详情"), runnableConfig)
+                        Map.of(
+                                AgentGraphKeys.QUERY, "查询订单 ORD20260810001 的详情",
+                                AgentGraphKeys.STREAM_ID, "finished-stream"), runnableConfig)
                 .orElseThrow();
         NodeOutput second = compiledGraph.invokeAndGetOutput(
-                        Map.of(AgentGraphKeys.QUERY, "ORD20260810001 可以退款吗"), runnableConfig)
+                        Map.of(
+                                AgentGraphKeys.QUERY, "ORD20260810001 可以退款吗",
+                                AgentGraphKeys.STREAM_ID, ""), runnableConfig)
                 .orElseThrow();
 
         assertEquals("本轮回答：查询订单 ORD20260810001 的详情",
@@ -89,5 +93,6 @@ class OrderAgentGraphConfigTest {
                 second.state().value(AgentGraphKeys.ANSWER, ""));
         assertEquals("ORDER_POLICY_QUERY",
                 second.state().value(AgentGraphKeys.PLAN_STRATEGY, ""));
+        assertEquals("", second.state().value(AgentGraphKeys.STREAM_ID, "missing"));
     }
 }

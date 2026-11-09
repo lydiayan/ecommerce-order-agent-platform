@@ -49,6 +49,12 @@ public class UserProfileRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
+    /**
+     * 按用户编号读取单条动态画像。
+     *
+     * @param userId 用户编号
+     * @return 用户画像，不存在时为空
+     */
     public Optional<UserProfile> findByUserId(String userId) {
         List<UserProfile> rows = jdbcTemplate.query(
                 """
@@ -65,6 +71,12 @@ public class UserProfileRepository {
         return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
     }
 
+    /**
+     * 新增或更新用户画像。更新已有画像时保留创建时间并递增版本号。
+     *
+     * @param profile 待持久化画像
+     * @return 数据库中的最新画像
+     */
     public UserProfile upsert(UserProfile profile) {
         Optional<UserProfile> existing = findByUserId(profile.getUserId());
         if (existing.isEmpty()) {

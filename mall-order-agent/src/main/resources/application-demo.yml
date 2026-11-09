@@ -10,5 +10,5 @@ agent:
     enabled: true
   auth:
     enabled: true
-    secure-cookie: false
+    secure-cookie: ${AGENT_SECURE_COOKIE:false}
     demo-impersonation-enabled: true

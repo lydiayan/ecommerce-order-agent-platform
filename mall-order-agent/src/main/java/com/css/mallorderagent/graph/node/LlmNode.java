@@ -7,6 +7,8 @@ import com.css.mallorderagent.graph.AgentGraphSupport;
 import com.css.mallorderagent.planner.HumanApprovalDetector;
 import com.css.mallorderagent.planner.PlanResult;
 import com.css.mallorderagent.prompt.BuiltPrompt;
+import com.css.mallorderagent.stream.AgentStreamDisconnectedException;
+import com.css.mallorderagent.stream.AgentStreamSessionRegistry;
 import com.example.mallordermilvusrag.config.RagDocumentProperties;
 import com.example.mallordermilvusrag.tracing.LlmSpanAttributes;
 import com.example.mallordermilvusrag.tracing.RagTracingAdvisor;
@@ -22,6 +24,8 @@ import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * LLM 节点：调用 ChatClient 生成回答。
@@ -38,13 +42,22 @@ public class LlmNode implements NodeAction {
 
     private final ChatClient chatClient;
     private final RagDocumentProperties.AskProperties askProperties;
+    private final AgentStreamSessionRegistry streamRegistry;
 
     public LlmNode(ChatClient chatClient,
-                   RagDocumentProperties ragDocumentProperties) {
+                   RagDocumentProperties ragDocumentProperties,
+                   AgentStreamSessionRegistry streamRegistry) {
         this.chatClient = chatClient;
         this.askProperties = ragDocumentProperties.getAsk();
+        this.streamRegistry = streamRegistry;
     }
 
+    /**
+     * 根据已构建 Prompt 同步或流式调用 LLM；敏感订单操作改用确定性确认模板。
+     *
+     * @param state 包含计划、Prompt、检索上下文和可选流编号的 Graph 状态
+     * @return 回答文本以及必要的人工确认标记
+     */
     @Override
     public Map<String, Object> apply(OverAllState state) {
         String query = AgentGraphSupport.resolveQuery(state);
@@ -64,9 +77,14 @@ public class LlmNode implements NodeAction {
             BuiltPrompt built = state.value(AgentGraphKeys.BUILT_PROMPT, BuiltPrompt.class)
                     .orElseThrow(() -> new IllegalStateException("builtPrompt is required before LlmNode"));
             int contextChunks = state.value(AgentGraphKeys.CONTEXT_HIT_COUNT, 0);
+            boolean webSearchEnabled = state.value(AgentGraphKeys.WEB_SEARCH_ENABLED, false);
             RagTraceScope trace = RagTracingAdvisor.parentScope();
-            answer = callLlm(trace, query, built, contextChunks);
-            log.info("LlmNode completed, strategy={}, answerLength={}", planStrategy, answer.length());
+            String streamId = state.value(AgentGraphKeys.STREAM_ID, "");
+            answer = streamId.isBlank()
+                    ? callLlm(trace, query, built, contextChunks, webSearchEnabled)
+                    : streamLlm(trace, query, built, contextChunks, streamId, webSearchEnabled);
+            log.info("LlmNode completed, strategy={}, webSearch={}, answerLength={}",
+                    planStrategy, webSearchEnabled, answer.length());
         }
 
         Map<String, Object> updates = new HashMap<>();
@@ -83,7 +101,8 @@ public class LlmNode implements NodeAction {
         return updates;
     }
 
-    private String callLlm(RagTraceScope trace, String query, BuiltPrompt built, int contextChunks) {
+    private String callLlm(RagTraceScope trace, String query, BuiltPrompt built,
+                           int contextChunks, boolean webSearchEnabled) {
         Map<String, Object> startAttributes = LlmSpanAttributes.buildStartAttributes(
                 query.length(),
                 contextChunks,
@@ -93,21 +112,100 @@ public class LlmNode implements NodeAction {
 
         try (RagTraceScope llmSpan = trace.child(RagTraceService.LLM_OPERATION, startAttributes)) {
             try {
-                ChatClient.ChatClientRequestSpec requestSpec = chatClient.prompt()
-                        .options(OpenAiChatOptions.builder()
-                                .model(askProperties.getModel())
-                                .temperature(askProperties.getTemperature())
-                                .build())
-                        .system(built.systemPrompt())
-                        .user(built.userMessage());
+                llmSpan.attribute("webSearchEnabled", webSearchEnabled);
+                ChatClient.ChatClientRequestSpec requestSpec = requestSpec(
+                        built, false, webSearchEnabled);
                 ChatResponse response = requestSpec.call().chatResponse();
                 llmSpan.attributes(LlmSpanAttributes.fromChatResponse(response));
+                llmSpan.attribute("streaming", false);
                 return extractAnswer(response);
             } catch (RuntimeException e) {
                 llmSpan.error(e);
                 throw e;
             }
         }
+    }
+
+    private String streamLlm(RagTraceScope trace, String query, BuiltPrompt built,
+                             int contextChunks, String streamId, boolean webSearchEnabled) {
+        Map<String, Object> startAttributes = LlmSpanAttributes.buildStartAttributes(
+                query.length(),
+                contextChunks,
+                askProperties.getModel(),
+                askProperties.getTemperature(),
+                built.systemPrompt().length() + built.userMessage().length());
+
+        try (RagTraceScope llmSpan = trace.child(RagTraceService.LLM_OPERATION, startAttributes)) {
+            long startedAt = System.nanoTime();
+            AtomicLong firstTokenLatencyMillis = new AtomicLong(-1);
+            AtomicLong chunkCount = new AtomicLong();
+            AtomicReference<ChatResponse> lastResponse = new AtomicReference<>();
+            StringBuilder answer = new StringBuilder();
+            try {
+                llmSpan.attribute("webSearchEnabled", webSearchEnabled);
+                requestSpec(built, true, webSearchEnabled).stream().chatResponse()
+                        .takeUntilOther(streamRegistry.cancellationSignal(streamId))
+                        .doOnNext(response -> {
+                            lastResponse.set(response);
+                            String delta = extractDelta(response);
+                            if (delta.isEmpty()) {
+                                return;
+                            }
+                            if (firstTokenLatencyMillis.compareAndSet(-1,
+                                    (System.nanoTime() - startedAt) / 1_000_000)) {
+                                log.debug("First streamed answer chunk received, latencyMs={}",
+                                        firstTokenLatencyMillis.get());
+                            }
+                            answer.append(delta);
+                            chunkCount.incrementAndGet();
+                            streamRegistry.emitDelta(streamId, delta);
+                        })
+                        .blockLast();
+
+                if (streamRegistry.isCancelled(streamId)) {
+                    throw new AgentStreamDisconnectedException("SSE client disconnected during generation");
+                }
+                if (answer.isEmpty()) {
+                    throw new IllegalStateException("LLM returned an empty answer");
+                }
+                llmSpan.attributes(LlmSpanAttributes.fromChatResponse(lastResponse.get()));
+                llmSpan.attribute("streaming", true);
+                llmSpan.attribute("ttftMs", firstTokenLatencyMillis.get());
+                llmSpan.attribute("firstTokenLatencyMs", firstTokenLatencyMillis.get());
+                llmSpan.attribute("chunkCount", chunkCount.get());
+                llmSpan.attribute("outputLength", answer.length());
+                return answer.toString();
+            } catch (RuntimeException e) {
+                llmSpan.error(e);
+                throw e;
+            }
+        }
+    }
+
+    private ChatClient.ChatClientRequestSpec requestSpec(BuiltPrompt built, boolean streaming,
+                                                         boolean webSearchEnabled) {
+        OpenAiChatOptions.Builder options = OpenAiChatOptions.builder()
+                .model(askProperties.getModel())
+                .temperature(askProperties.getTemperature());
+        if (streaming) {
+            options.streamUsage(true);
+        }
+        if (webSearchEnabled) {
+            options.extraBody(Map.of("enable_search", true));
+        }
+        return chatClient.prompt()
+                .options(options.build())
+                .system(built.systemPrompt())
+                .user(built.userMessage());
+    }
+
+    private static String extractDelta(ChatResponse response) {
+        Generation generation = response != null ? response.getResult() : null;
+        if (generation == null || generation.getOutput() == null) {
+            return "";
+        }
+        String text = generation.getOutput().getText();
+        return text != null ? text : "";
     }
 
     private static String extractAnswer(ChatResponse response) {
